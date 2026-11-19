@@ -63,13 +63,21 @@ preflight() {
     die "IP host-only ${MY_IP} absente (vérifier le réseau VirtualBox 192.168.56.0/24)"
   fi
 
-  local i
+  # On teste le fichier réellement téléchargé ensuite (la racine du site renvoie 403)
+  local url code i
+  if [[ "$ROLE" == "srv01" ]]; then
+    url="https://packages.wazuh.com/${WAZUH_VERSION}/wazuh-install.sh"
+  else
+    url="https://packages.wazuh.com/key/GPG-KEY-WAZUH"
+  fi
   for i in 1 2 3; do
-    curl -fsS --max-time 15 -o /dev/null https://packages.wazuh.com/ && break
+    code=$(curl -sS -o /dev/null -I -L --max-time 15 -w '%{http_code}' "$url" 2>/dev/null || true)
+    [[ "$code" != "000" && -n "$code" ]] && break
     [[ $i -eq 3 ]] && die "pas d'accès Internet (packages.wazuh.com injoignable)"
     sleep 5
   done
-  log "  Internet — OK"
+  [[ "$code" == "200" ]] || die "$url répond HTTP $code (version Wazuh ${WAZUH_VERSION} introuvable ?)"
+  log "  Internet + dépôt Wazuh — OK"
 }
 
 # -----------------------------------------------------------------------------
