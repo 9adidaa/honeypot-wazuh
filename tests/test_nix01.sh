@@ -72,7 +72,7 @@ check "auditd actif"                      systemctl is-active --quiet auditd
 check "fichier de règles présent"         test -f /etc/audit/rules.d/honeypot-privesc.rules
 loaded=$(auditctl -l 2>/dev/null)
 for k in hp_identity hp_sudoers hp_cron hp_preload hp_exec hp_find hp_setuid hp_setgid hp_capset hp_ptrace hp_mount hp_module; do
-  grep -q "key=$k" <<<"$loaded" && ok "règle audit chargée: $k" || fail "règle audit manquante: $k"
+  grep -Eq "(key=|-k )$k( |$)" <<<"$loaded" && ok "règle audit chargée: $k" || fail "règle audit manquante: $k"
 done
 grep -q "^enabled 2" < <(auditctl -s 2>/dev/null) && warn "auditd verrouillé (enabled 2) : reboot nécessaire pour modifier les règles"
 
@@ -96,7 +96,7 @@ grep -q "ERROR" <(tail -200 /var/ossec/logs/ossec.log 2>/dev/null) \
 # -----------------------------------------------------------------------------
 if [[ "${1:-}" == "--trigger" ]]; then
   sec "5. Déclenchement privesc / FIM (à vérifier sur SRV01)"
-  sudo -u nix01 find /tmp -maxdepth 0 >/dev/null 2>&1          && ok "find lancé (hp_find -> 100218)"
+  (cd / && sudo -u nix01 find /tmp -maxdepth 0 >/dev/null 2>&1); ok "find lancé (hp_find -> 100218)"
   sudo -u nix01 sudo -n true >/dev/null 2>&1;                     ok "sudo lancé (hp_exec -> 100214)"
   touch /etc/cron.d/hp_selftest && rm -f /etc/cron.d/hp_selftest && ok "cron.d modifié (hp_cron -> 100212)"
   echo "$RUNID" > "$APPDIR/hp_selftest.txt"; sleep 3; rm -f "$APPDIR/hp_selftest.txt"
