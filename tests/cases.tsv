@@ -1,0 +1,10 @@
+# name	expected_rule	method	path	data	ua	logline
+sqli_login_bypass	100111	POST	/login	username=admin%27+--+&password=x	curl/8.5.0	HONEYPOT-ACCESS src=203.0.113.50 method=POST path=/login status=302 body=username=admin'+--+&password=x ua=curl/8.5.0
+sqli_union	100110	GET	/?q=1%27%20UNION%20SELECT%201,2,3--	-	curl/8.5.0	HONEYPOT-ACCESS src=203.0.113.50 method=GET path=/?q=1%2527%2520UNION%2520SELECT%25201,2,3-- status=200 body=q=1'+UNION+SELECT+1,2,3-- ua=curl/8.5.0
+scanner_ua	100112	GET	/login	-	sqlmap/1.7.2#stable	HONEYPOT-ACCESS src=203.0.113.50 method=GET path=/login status=200 body=- ua=sqlmap/1.7.2#stable
+xss_feedback	100120	POST	/feedback	name=attacker&comment=%3Cscript%3Ealert(document.cookie)%3C%2Fscript%3E	curl/8.5.0	HONEYPOT-ACCESS src=203.0.113.50 method=POST path=/feedback status=200 body=name=attacker&comment=<script>alert(document.cookie)</script> ua=curl/8.5.0
+method_tampering	100130	DELETE	/admin	-	curl/8.5.0	HONEYPOT-ACCESS src=203.0.113.50 method=DELETE path=/admin status=200 body=- ua=curl/8.5.0
+cmd_injection	100150	GET	/?host=127.0.0.1;whoami	-	curl/8.5.0	HONEYPOT-ACCESS src=203.0.113.50 method=GET path=/?host=127.0.0.1;whoami status=200 body=host=127.0.0.1;whoami ua=curl/8.5.0
+sensitive_path	100140	GET	/.env	-	curl/8.5.0	HONEYPOT-ACCESS src=203.0.113.50 method=GET path=/.env status=404 body=- ua=curl/8.5.0
+normal_request	100101	GET	/	-	curl/8.5.0	HONEYPOT-ACCESS src=203.0.113.50 method=GET path=/ status=200 body=- ua=curl/8.5.0
+not_found	100199	GET	/nothing-here	-	curl/8.5.0	HONEYPOT-ACCESS src=203.0.113.50 method=GET path=/nothing-here status=404 body=- ua=curl/8.5.0

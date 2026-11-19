@@ -1,0 +1,181 @@
+<!-- ============================================================
+     SweetBuzz Honey Pot detection rules - web attacks + priv-esc
+     All literal < > & in regexes are XML-escaped.
+     ============================================================ -->
+<group name="honeypot,web,">
+
+  <rule id="100100" level="0">
+    <decoded_as>hp-access</decoded_as>
+    <description>SweetBuzz access log base event.</description>
+  </rule>
+
+  <rule id="100111" level="12">
+    <if_sid>100100</if_sid>
+    <field name="hpbody" type="pcre2">(?i)(admin'[+\s%]*--|'[+\s]*or[+\s]+'?1|'[+\s]*or[+\s]+1[+\s]*=[+\s]*1|'[+\s]*--|%27[+\s%]*--|%27[+\s]*or)</field>
+    <description>SweetBuzz authentication bypass / SQL injection in login (SQLi)</description>
+    <mitre><id>T1078</id></mitre>
+    <group>attack,sqli,authentication_failed,</group>
+  </rule>
+
+  <rule id="100110" level="12">
+    <if_sid>100100</if_sid>
+    <field name="hpbody" type="pcre2">(?i)(union[+%\s]*select|select[+%0-9a-f\s]{1,8}from|or[+\s]*1[+\s]*=[+\s]*1|sleep\(|benchmark\(|information_schema|xp_cmdshell|%27|%22|--[+\s])</field>
+    <description>SQL injection attempt against SweetBuzz (SQLi)</description>
+    <mitre><id>T1190</id></mitre>
+    <group>attack,sqli,</group>
+  </rule>
+
+  <rule id="100112" level="12">
+    <if_sid>100100</if_sid>
+    <field name="hpua" type="pcre2">(?i)(sqlmap|nikto|nmap|nessus|acunetix|havij|masscan|gobuster|dirb|wfuzz|hydra|burp)</field>
+    <description>Known attack tool / scanner user-agent detected on SweetBuzz</description>
+    <mitre><id>T1595</id></mitre>
+    <group>attack,recon,scanner,</group>
+  </rule>
+
+  <rule id="100120" level="10">
+    <if_sid>100100</if_sid>
+    <field name="hpbody" type="pcre2">(?i)(script|onerror|javascript:|document\.cookie|%3c|svG/onload|img[+\s]src)</field>
+    <description>XSS / HTML injection payload submitted to SweetBuzz</description>
+    <mitre><id>T1059.007</id></mitre>
+    <group>attack,xss,</group>
+  </rule>
+
+  <rule id="100130" level="12">
+    <if_sid>100100</if_sid>
+    <field name="hpmethod" type="pcre2">^DELETE$|^PUT$|^PATCH$</field>
+    <description>HTTP method tampering / admin honeypot trap triggered on /admin</description>
+    <mitre><id>T1190</id></mitre>
+    <group>attack,method_tampering,</group>
+  </rule>
+
+  <rule id="100150" level="12">
+    <if_sid>100100</if_sid>
+    <field name="hpbody" type="pcre2">(?i)(;|\||`|\$\(|&amp;&amp;)[+\s]*(whoami|id|cat|ls|curl|wget|nc|bash|sh|python)</field>
+    <description>Potential command injection payload on SweetBuzz</description>
+    <mitre><id>T1059</id></mitre>
+    <group>attack,command_injection,</group>
+  </rule>
+
+  <rule id="100140" level="6">
+    <if_sid>100100</if_sid>
+    <field name="hppath" type="pcre2">(?i)(\.env|\.git|wp-admin|phpmyadmin|\.aws|id_rsa|backup\.sql|\.bak|\.\./|%2e%2e)</field>
+    <description>Honeypot probe for sensitive path/file</description>
+    <mitre><id>T1595</id></mitre>
+    <group>attack,recon,</group>
+  </rule>
+
+  <rule id="100199" level="3">
+    <if_sid>100100</if_sid>
+    <field name="hpstatus" type="pcre2">^404$</field>
+    <description>SweetBuzz 404 (probing)</description>
+  </rule>
+
+  <rule id="100191" level="8" frequency="8" timeframe="120">
+    <if_matched_sid>100199</if_matched_sid>
+    <same_source_ip />
+    <description>Directory/file brute force against SweetBuzz (many 404s)</description>
+    <mitre><id>T1595</id></mitre>
+    <group>attack,recon,web_scan,</group>
+  </rule>
+
+  <rule id="100101" level="3">
+    <if_sid>100100</if_sid>
+    <description>SweetBuzz HTTP request</description>
+  </rule>
+
+</group>
+
+<!-- ===================== Privilege escalation ===================== -->
+<group name="honeypot,linux,privilege_escalation,">
+
+  <rule id="100200" level="3">
+    <if_sid>80700</if_sid>
+    <field name="audit.key" type="pcre2">^hp_</field>
+    <description>Honeypot audit event (key match)</description>
+  </rule>
+
+  <rule id="100210" level="8">
+    <if_sid>80700</if_sid>
+    <field name="audit.key" type="pcre2">^hp_identity$</field>
+    <description>Identity file modified (/etc/passwd|shadow|group|gshadow) - possible privesc backdoor</description>
+    <mitre><id>T1136.001</id></mitre>
+    <group>attack,privilege_escalation,persistence,</group>
+  </rule>
+
+  <rule id="100211" level="10">
+    <if_sid>80700</if_sid>
+    <field name="audit.key" type="pcre2">^hp_sudoers$</field>
+    <description>Sudoers configuration modified - possible privilege escalation</description>
+    <mitre><id>T1548.003</id></mitre>
+    <group>attack,privilege_escalation,</group>
+  </rule>
+
+  <rule id="100212" level="10">
+    <if_sid>80700</if_sid>
+    <field name="audit.key" type="pcre2">^hp_cron$</field>
+    <description>Cron configuration modified - possible persistence/privesc</description>
+    <mitre><id>T1053.003</id></mitre>
+    <group>attack,privilege_escalation,persistence,</group>
+  </rule>
+
+  <rule id="100213" level="12">
+    <if_sid>80700</if_sid>
+    <field name="audit.key" type="pcre2">^hp_preload$</field>
+    <description>ld.so.preload modified - LD_PRELOAD rootkit/privesc attempt</description>
+    <mitre><id>T1574.006</id></mitre>
+    <group>attack,privilege_escalation,rootkit,</group>
+  </rule>
+
+  <rule id="100214" level="10">
+    <if_sid>80700</if_sid>
+    <field name="audit.key" type="pcre2">^hp_exec$</field>
+    <description>Privileged command executed (sudo/su/passwd/usermod/groupmod)</description>
+    <mitre><id>T1548</id></mitre>
+    <group>attack,privilege_escalation,</group>
+  </rule>
+
+  <rule id="100215" level="10">
+    <if_sid>80700</if_sid>
+    <field name="audit.key" type="pcre2">^hp_setuid$|^hp_setgid$|^hp_capset$</field>
+    <description>setuid/setgid/capability change by non-root - privesc indicator</description>
+    <mitre><id>T1548.001</id></mitre>
+    <group>attack,privilege_escalation,</group>
+  </rule>
+
+  <rule id="100216" level="12">
+    <if_sid>80700</if_sid>
+    <field name="audit.key" type="pcre2">^hp_ptrace$</field>
+    <description>ptrace by non-root user - process injection / privesc indicator</description>
+    <mitre><id>T1055</id></mitre>
+    <group>attack,privilege_escalation,</group>
+  </rule>
+
+  <rule id="100217" level="12">
+    <if_sid>80700</if_sid>
+    <field name="audit.key" type="pcre2">^hp_mount$|^hp_module$</field>
+    <description>Mount / kernel module operation by non-root - privesc indicator</description>
+    <mitre><id>T1548.002</id></mitre>
+    <group>attack,privilege_escalation,</group>
+  </rule>
+
+  <rule id="100218" level="8">
+    <if_sid>80700</if_sid>
+    <field name="audit.key" type="pcre2">^hp_find$</field>
+    <description>find executed - possible SUID enumeration / privesc recon</description>
+    <mitre><id>T1083</id></mitre>
+    <group>attack,privilege_escalation,recon,</group>
+  </rule>
+
+</group>
+
+<!-- ================ FIM: honeypot app + sensitive files ================ -->
+<group name="honeypot,linux,syscheck,">
+  <rule id="100300" level="7">
+    <if_sid>550,554</if_sid>
+    <field name="file" type="pcre2">/home/nix01/honeypot_app</field>
+    <description>SweetBuzz honeypot application files modified (FIM)</description>
+    <mitre><id>T1565</id></mitre>
+    <group>attack,web,integrity_monitoring,</group>
+  </rule>
+</group>

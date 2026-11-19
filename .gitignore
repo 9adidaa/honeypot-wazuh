@@ -1,0 +1,29 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Données runtime du honeypot
+*.db
+honeypots/**/logs/
+*.log
+!docs/samples/*.log
+
+# Secrets / identifiants
+.env
+creds.txt
+*.pem
+*.key
+
+# Sauvegardes générées par les scripts
+*.bak.*
+
+# Vagrant / OS / éditeurs
+.vagrant/
+.DS_Store
+.vscode/
+.idea/
+
+# Identifiants générés par vagrant up
+.secrets/

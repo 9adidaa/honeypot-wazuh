@@ -1,0 +1,28 @@
+## Wazuh honeypot - privilege escalation audit rules (NIX01)
+-D
+-b 8192
+-w /etc/passwd -p wa -k hp_identity
+-w /etc/shadow -p wa -k hp_identity
+-w /etc/group -p wa -k hp_identity
+-w /etc/gshadow -p wa -k hp_identity
+-w /etc/sudoers -p wa -k hp_sudoers
+-w /etc/sudoers.d -p wa -k hp_sudoers
+-w /var/spool/cron -p wa -k hp_cron
+-w /etc/crontab -p wa -k hp_cron
+-w /etc/cron.d -p wa -k hp_cron
+-w /etc/ld.so.preload -p wa -k hp_preload
+-a always,exit -F arch=b64 -S execve -F exe=/usr/bin/sudo -k hp_exec
+-a always,exit -F arch=b64 -S execve -F exe=/usr/bin/su -k hp_exec
+-a always,exit -F arch=b64 -S execve -F exe=/usr/bin/passwd -k hp_exec
+-a always,exit -F arch=b64 -S execve -F exe=/usr/sbin/useradd -k hp_exec
+-a always,exit -F arch=b64 -S execve -F exe=/usr/sbin/usermod -k hp_exec
+-a always,exit -F arch=b64 -S execve -F exe=/usr/sbin/groupadd -k hp_exec
+-a always,exit -F arch=b64 -S execve -F exe=/usr/sbin/groupmod -k hp_exec
+-a always,exit -F arch=b64 -S execve -F exe=/usr/bin/chsh -k hp_exec
+-a always,exit -F arch=b64 -S execve -F exe=/usr/bin/find -k hp_find
+-a always,exit -F arch=b64 -S setuid -F euid!=0 -k hp_setuid
+-a always,exit -F arch=b64 -S setgid -F euid!=0 -k hp_setgid
+-a always,exit -F arch=b64 -S capset -F euid!=0 -k hp_capset
+-a always,exit -F arch=b64 -S ptrace -F euid!=0 -k hp_ptrace
+-a always,exit -F arch=b64 -S mount -F euid!=0 -k hp_mount
+-a always,exit -F arch=b64 -S delete_module -k hp_module

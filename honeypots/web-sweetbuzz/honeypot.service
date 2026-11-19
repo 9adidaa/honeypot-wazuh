@@ -1,0 +1,12 @@
+[Unit]
+Description=SweetBuzz Honey Pot Web App
+After=network.target
+
+[Service]
+User=nix01
+WorkingDirectory=/home/nix01/honeypot_app
+ExecStart=/home/nix01/honeypot_app/venv/bin/python app.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
