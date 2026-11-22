@@ -218,8 +218,11 @@ alerts, start, agent = sys.argv[1], int(sys.argv[2]), sys.argv[3]
 want = {
     "ssh": {"100401", "100402", "100410", "100404", "100423", "100421", "100422"},
     "ftp": {"100401", "100402", "100410", "100404", "100432", "100431"},
+    # 100445 (SAVE seul) est volontairement absent : dans le scénario d'attaque, le SAVE
+    # suit toujours un CONFIG SET dir/dbfilename dans la même session, donc l'événement SAVE
+    # déclenche la corrélation 100446 (qui remplace 100445, dont elle est l'enfant if_sid).
     "redis": {"100401", "100402", "100410", "100440", "100441", "100442", "100443", "100444",
-              "100445", "100446", "100447"},
+              "100446", "100447"},
 }
 
 
