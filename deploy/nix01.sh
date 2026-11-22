@@ -9,6 +9,7 @@
 #   3. Adds an @app.after_request access-log hook -> logs/access.log
 #   4. Installs auditd + custom privesc audit rules
 #   5. Installs the Wazuh agent, enrolls it, and adds localfiles/FIM/rootcheck/SCA
+#   6. Deploys the SSH (2222) / FTP (21) / Redis (6379) honeypots (deploy/honeypots.sh)
 #
 # Idempotent: safe to re-run. Backs up existing files before overwriting.
 #
@@ -231,6 +232,12 @@ PY
 else
   log "Honeypot block already present in ossec.conf — skipping"
 fi
+
+# -----------------------------------------------------------------------------
+# 4b. Honeypots SSH / FTP / Redis (+ localfile JSON de l'agent)
+# -----------------------------------------------------------------------------
+log "Deploying SSH/FTP/Redis honeypots (deploy/honeypots.sh)"
+bash "$REPO_DIR/deploy/honeypots.sh"
 
 # -----------------------------------------------------------------------------
 # 5. Enroll agent with the manager (only if not already enrolled)

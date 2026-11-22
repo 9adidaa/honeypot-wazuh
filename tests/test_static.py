@@ -105,7 +105,7 @@ def load_cases():
 def t_bash():
     section("1. Scripts bash")
     scripts = [SRV01, NIX01, "deploy/vagrant/provision.sh", f"{WEBAPP}/deploy.sh",
-               "tests/test_nix01.sh", "tests/test_srv01.sh"]
+               "tests/test_nix01.sh", "tests/test_srv01.sh", "deploy/honeypots.sh"]
     has_sc = shutil.which("shellcheck")
     for s in scripts:
         p = os.path.join(ROOT, s)
