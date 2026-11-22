@@ -189,7 +189,7 @@ class Session:
                 return await self.send("425 Could not open passive connection.")
             return await self.send(f"229 Entering Extended Passive Mode (|||{p}|)")
         if verb in ("PORT", "EPRT"):
-            self.log("active_mode_request", data=arg)  # PORT peut servir au "FTP bounce"
+            self.log("active_mode_request", argument=arg)  # PORT peut servir au "FTP bounce"
             return await self.send("500 Illegal PORT command.")
         if verb in ("LIST", "NLST", "MLSD"):
             target = self.path(arg) if arg and not arg.startswith("-") else self.cwd

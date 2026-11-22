@@ -14,6 +14,7 @@ set -euo pipefail
 WAZUH_ETC="/var/ossec/etc"
 DECODER="$WAZUH_ETC/decoders/honeypot_decoders.xml"
 RULES="$WAZUH_ETC/rules/honeypot_rules.xml"
+SVC_RULES="$WAZUH_ETC/rules/honeypot_services_rules.xml"
 OSSEC_CONF="$WAZUH_ETC/ossec.conf"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 
@@ -232,6 +233,228 @@ cat > "$RULES" <<'XML'
 XML
 
 # -----------------------------------------------------------------------------
+# 2b. Rules for the SSH / FTP / Redis honeypots (JSON lines, IDs 100399-100499)
+# -----------------------------------------------------------------------------
+log "Installing honeypot services rules -> $SVC_RULES"
+[[ -f "$SVC_RULES" ]] && cp -a "$SVC_RULES" "${SVC_RULES}.bak.${STAMP}"
+cat > "$SVC_RULES" <<'XML'
+<!-- ============================================================
+     Honeypots SSH / FTP / Redis (JSON lines, decodeur json natif)
+     IDs 100400-100499. Champs : honeypot, event_type, srcip,
+     session, username, password, command, filename, sha256...
+     La regle native 86600 (Suricata) capte deja tout JSON ayant
+     timestamp + event_type : la base existe donc en deux
+     variantes (enfant de 86600 / racine) et les enfants
+     acceptent les deux parents.
+     ============================================================ -->
+<group name="honeypot,honeypot_services,">
+
+  <rule id="100399" level="0">
+    <if_sid>86600</if_sid>
+    <field name="honeypot" type="pcre2">^(ssh|ftp|redis)$</field>
+    <description>Honeypot $(honeypot) event (via JSON/86600)</description>
+  </rule>
+
+  <rule id="100400" level="0">
+    <decoded_as>json</decoded_as>
+    <field name="honeypot" type="pcre2">^(ssh|ftp|redis)$</field>
+    <description>Honeypot $(honeypot) event</description>
+  </rule>
+
+  <!-- ===================== connexions / authentification ===================== -->
+  <rule id="100401" level="3">
+    <if_sid>100399,100400</if_sid>
+    <field name="event_type" type="pcre2">^connection$</field>
+    <description>Honeypot $(honeypot): new connection</description>
+    <mitre><id>T1046</id></mitre>
+    <group>connection,</group>
+  </rule>
+
+  <rule id="100402" level="5">
+    <if_sid>100399,100400</if_sid>
+    <field name="event_type" type="pcre2">^login_attempt$</field>
+    <field name="success" type="pcre2">^false$</field>
+    <description>Honeypot $(honeypot): failed login for user '$(username)'</description>
+    <mitre><id>T1110</id></mitre>
+    <group>authentication_failed,</group>
+  </rule>
+
+  <rule id="100403" level="3">
+    <if_sid>100399,100400</if_sid>
+    <field name="event_type" type="pcre2">^login_attempt$</field>
+    <field name="success" type="pcre2">^true$</field>
+    <description>Honeypot $(honeypot): login attempt with accepted credentials for '$(username)'</description>
+    <mitre><id>T1110</id></mitre>
+  </rule>
+
+  <rule id="100404" level="10">
+    <if_sid>100399,100400</if_sid>
+    <field name="event_type" type="pcre2">^login_success$</field>
+    <description>Honeypot $(honeypot): attacker logged in as '$(username)' (weak credentials)</description>
+    <mitre><id>T1078</id></mitre>
+    <group>authentication_success,</group>
+  </rule>
+
+  <rule id="100410" level="10" frequency="6" timeframe="120">
+    <if_matched_sid>100402</if_matched_sid>
+    <same_source_ip />
+    <same_field>honeypot</same_field>
+    <description>Honeypot $(honeypot): brute force (6+ failed logins from the same IP in 2 min)</description>
+    <mitre><id>T1110.001</id></mitre>
+    <group>authentication_failures,brute_force,</group>
+  </rule>
+
+  <!-- ===================== commandes (toutes) ===================== -->
+  <rule id="100420" level="3">
+    <if_sid>100399,100400</if_sid>
+    <field name="event_type" type="pcre2">^command$</field>
+    <description>Honeypot $(honeypot): command '$(command)'</description>
+    <group>honeypot_command,</group>
+  </rule>
+
+  <!-- SSH : commandes du faux shell (du plus grave au moins grave) -->
+  <rule id="100422" level="12">
+    <if_sid>100420</if_sid>
+    <field name="honeypot" type="pcre2">^ssh$</field>
+    <field name="command" type="pcre2">(?i)(/dev/tcp/|\bnc\b.*\s-e\s|\bbash\s+-i\b|python[23]?\s+-c.*socket|base64\s+(-d|--decode)|\bchmod\s+(\+x|[0-7]*7[0-7]*)\b|crontab|authorized_keys|\brm\s+-rf\b|history\s+-c|unset\s+HISTFILE|/etc/shadow|\buseradd\b|\bpasswd\b|\bkill\s+-9\b|xmrig|minerd)</field>
+    <description>SSH honeypot: dangerous command (persistence / reverse shell / anti-forensics): $(command)</description>
+    <mitre><id>T1059.004</id></mitre>
+    <group>honeypot_ssh,attack,</group>
+  </rule>
+
+  <rule id="100421" level="10">
+    <if_sid>100420</if_sid>
+    <field name="honeypot" type="pcre2">^ssh$</field>
+    <field name="command" type="pcre2">(?i)\b(wget|curl|tftp|ftpget|scp|fetch)\b</field>
+    <description>SSH honeypot: malware download attempt: $(command)</description>
+    <mitre><id>T1105</id></mitre>
+    <group>honeypot_ssh,attack,download,</group>
+  </rule>
+
+  <rule id="100423" level="5">
+    <if_sid>100420</if_sid>
+    <field name="honeypot" type="pcre2">^ssh$</field>
+    <field name="command" type="pcre2">(?i)^\s*(uname|whoami|id|hostname|nproc|lscpu|free|df|w|uptime|ifconfig|ip\s+a|ps|cat\s+/proc/cpuinfo|cat\s+/etc/passwd)\b</field>
+    <description>SSH honeypot: system discovery command: $(command)</description>
+    <mitre><id>T1082</id></mitre>
+    <group>honeypot_ssh,recon,</group>
+  </rule>
+
+  <!-- FTP -->
+  <rule id="100430" level="10">
+    <if_sid>100399,100400</if_sid>
+    <field name="honeypot" type="pcre2">^ftp$</field>
+    <field name="event_type" type="pcre2">^file_upload$</field>
+    <description>FTP honeypot: file uploaded '$(filename)' (sha256 $(sha256))</description>
+    <mitre><id>T1105</id></mitre>
+    <group>honeypot_ftp,attack,file_upload,</group>
+  </rule>
+
+  <rule id="100431" level="12">
+    <if_sid>100430</if_sid>
+    <field name="filename" type="pcre2">(?i)\.(sh|elf|bin|exe|dll|php\d?|phtml|jsp|aspx?|py|pl|so)$</field>
+    <description>FTP honeypot: executable / script / web shell uploaded '$(filename)'</description>
+    <mitre><id>T1105</id><id>T1505.003</id></mitre>
+    <group>honeypot_ftp,attack,file_upload,malware,</group>
+  </rule>
+
+  <rule id="100432" level="6">
+    <if_sid>100399,100400</if_sid>
+    <field name="honeypot" type="pcre2">^ftp$</field>
+    <field name="event_type" type="pcre2">^file_download$</field>
+    <description>FTP honeypot: file downloaded '$(filename)'</description>
+    <mitre><id>T1005</id></mitre>
+    <group>honeypot_ftp,exfiltration,</group>
+  </rule>
+
+  <rule id="100433" level="6">
+    <if_sid>100399,100400</if_sid>
+    <field name="honeypot" type="pcre2">^ftp$</field>
+    <field name="event_type" type="pcre2">^active_mode_request$</field>
+    <description>FTP honeypot: PORT/EPRT request (possible FTP bounce scan)</description>
+    <mitre><id>T1046</id></mitre>
+    <group>honeypot_ftp,recon,</group>
+  </rule>
+
+  <!-- Redis : commandes d'attaque -->
+  <rule id="100442" level="13">
+    <if_sid>100420</if_sid>
+    <field name="honeypot" type="pcre2">^redis$</field>
+    <field name="command" type="pcre2">(?i)^MODULE\s+LOAD\b</field>
+    <description>Redis honeypot: MODULE LOAD (malicious module / RCE attempt): $(command)</description>
+    <mitre><id>T1129</id></mitre>
+    <group>honeypot_redis,attack,</group>
+  </rule>
+
+  <rule id="100441" level="12">
+    <if_sid>100420</if_sid>
+    <field name="honeypot" type="pcre2">^redis$</field>
+    <field name="command" type="pcre2">(?i)^(SLAVEOF|REPLICAOF)\s+(?!NO\s+ONE)</field>
+    <description>Redis honeypot: SLAVEOF/REPLICAOF to attacker host (rogue master): $(command)</description>
+    <mitre><id>T1105</id></mitre>
+    <group>honeypot_redis,attack,</group>
+  </rule>
+
+  <rule id="100440" level="12">
+    <if_sid>100420</if_sid>
+    <field name="honeypot" type="pcre2">^redis$</field>
+    <field name="command" type="pcre2">(?i)^CONFIG\s+SET\s+(dir|dbfilename)\b</field>
+    <description>Redis honeypot: CONFIG SET dir/dbfilename (arbitrary file write: cron / authorized_keys): $(command)</description>
+    <mitre><id>T1190</id><id>T1053.003</id></mitre>
+    <group>honeypot_redis,attack,</group>
+  </rule>
+
+  <rule id="100443" level="10">
+    <if_sid>100420</if_sid>
+    <field name="honeypot" type="pcre2">^redis$</field>
+    <field name="command" type="pcre2">(?i)^(EVAL|EVALSHA)\b</field>
+    <description>Redis honeypot: Lua EVAL (sandbox escape CVE-2022-0543?): $(command)</description>
+    <mitre><id>T1059</id></mitre>
+    <group>honeypot_redis,attack,</group>
+  </rule>
+
+  <rule id="100444" level="8">
+    <if_sid>100420</if_sid>
+    <field name="honeypot" type="pcre2">^redis$</field>
+    <field name="command" type="pcre2">(?i)^(FLUSHALL|FLUSHDB)\b</field>
+    <description>Redis honeypot: database wiped ($(command))</description>
+    <mitre><id>T1485</id></mitre>
+    <group>honeypot_redis,attack,</group>
+  </rule>
+
+  <rule id="100445" level="6">
+    <if_sid>100420</if_sid>
+    <field name="honeypot" type="pcre2">^redis$</field>
+    <field name="command" type="pcre2">(?i)^(SAVE|BGSAVE)$</field>
+    <description>Redis honeypot: SAVE/BGSAVE (writes the dump file to disk)</description>
+    <mitre><id>T1053.003</id></mitre>
+    <group>honeypot_redis,</group>
+  </rule>
+
+  <rule id="100446" level="14" timeframe="600">
+    <if_sid>100445</if_sid>
+    <if_matched_sid>100440</if_matched_sid>
+    <same_field>session</same_field>
+    <description>Redis honeypot: CONFIG SET dir/dbfilename followed by SAVE - file write attack completed</description>
+    <mitre><id>T1053.003</id><id>T1098.004</id></mitre>
+    <group>honeypot_redis,attack,persistence,</group>
+  </rule>
+
+  <rule id="100447" level="8">
+    <if_sid>100399,100400</if_sid>
+    <field name="honeypot" type="pcre2">^redis$</field>
+    <field name="event_type" type="pcre2">^cross_protocol$</field>
+    <description>Redis honeypot: HTTP request sent to Redis (SSRF / cross-protocol attack)</description>
+    <mitre><id>T1190</id></mitre>
+    <group>honeypot_redis,attack,</group>
+  </rule>
+
+</group>
+XML
+chown root:wazuh "$DECODER" "$RULES" "$SVC_RULES" 2>/dev/null || true
+chmod 660 "$DECODER" "$RULES" "$SVC_RULES"
+
+# -----------------------------------------------------------------------------
 # 3. Enable alert archives (logall) for debugging/troubleshooting
 # -----------------------------------------------------------------------------
 if ! grep -q "<logall>yes</logall>" "$OSSEC_CONF"; then
@@ -275,6 +498,8 @@ log "Decoder/rule smoke test:"
 SMOKE_IN="$(mktemp)"
 printf "HONEYPOT-ACCESS src=1.2.3.4 method=DELETE path=/admin status=200 body=- ua=curl xff=-\n" > "$SMOKE_IN"
 smoke_out=$(/var/ossec/bin/wazuh-logtest -v < "$SMOKE_IN" 2>&1 || true)
+printf '%s\n' '{"timestamp":"2026-11-22T10:00:00+00:00","honeypot":"redis","event_type":"command","srcip":"1.2.3.4","src_port":4242,"session":"smoke","command":"MODULE LOAD /tmp/exp.so"}' > "$SMOKE_IN"
+smoke_json=$(/var/ossec/bin/wazuh-logtest -v < "$SMOKE_IN" 2>&1 || true)
 rm -f "$SMOKE_IN"
 
 smoke_ok=1
@@ -283,6 +508,11 @@ grep -q "id: '100130'" <<<"$smoke_out" || grep -q "Rule 100130 matched" <<<"$smo
 if [[ $smoke_ok -eq 1 ]]; then
   log "  decoder hp-access: OK"
   log "  rule 100130 (method tampering): OK"
+  if grep -q "id: '100442'" <<<"$smoke_json"; then
+    log "  rule 100442 (Redis MODULE LOAD, JSON honeypots): OK"
+  else
+    warn "  JSON honeypot rule 100442 not matched — check: echo '<json>' | wazuh-logtest -v"
+  fi
 else
   warn "Smoke test incomplete — re-run wazuh-logtest manually to inspect (analysisd may still be starting)."
 fi
