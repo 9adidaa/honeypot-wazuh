@@ -17,6 +17,7 @@ RULES="$WAZUH_ETC/rules/honeypot_rules.xml"
 SVC_RULES="$WAZUH_ETC/rules/honeypot_services_rules.xml"
 OSSEC_CONF="$WAZUH_ETC/ossec.conf"
 STAMP="$(date +%Y%m%d-%H%M%S)"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 log()  { echo -e "\e[1;32m[+]\e[0m $*"; }
 warn() { echo -e "\e[1;33m[!]\e[0m $*"; }
@@ -516,6 +517,11 @@ if [[ $smoke_ok -eq 1 ]]; then
 else
   warn "Smoke test incomplete — re-run wazuh-logtest manually to inspect (analysisd may still be starting)."
 fi
+
+# -----------------------------------------------------------------------------
+# 6. Wazuh dashboard "Honeypot" (visualisations importées automatiquement)
+# -----------------------------------------------------------------------------
+bash "$REPO_DIR/deploy/dashboard.sh" || warn "Import du dashboard Honeypot échoué (relancer: sudo bash deploy/dashboard.sh)"
 
 enabled=$(grep -E "Total rules enabled" /var/ossec/logs/ossec.log 2>/dev/null | tail -1 | sed -E "s/.*'([0-9]+)'.*/\1/" || echo "?")
 log "Done. Total rules enabled: ${enabled}"

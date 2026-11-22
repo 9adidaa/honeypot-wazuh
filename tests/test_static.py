@@ -111,7 +111,8 @@ def load_cases():
 def t_bash():
     section("1. Scripts bash")
     scripts = [SRV01, NIX01, "deploy/vagrant/provision.sh", f"{WEBAPP}/deploy.sh",
-               "tests/test_nix01.sh", "tests/test_srv01.sh", "deploy/honeypots.sh"]
+               "tests/test_nix01.sh", "tests/test_srv01.sh", "deploy/honeypots.sh",
+               "deploy/dashboard.sh"]
     has_sc = shutil.which("shellcheck")
     for s in scripts:
         p = os.path.join(ROOT, s)
@@ -576,6 +577,40 @@ def t_hp_live():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+# --------------------------------------------------------------------------- 9 dashboard
+def t_dashboard():
+    section("9. Dashboard Wazuh (wazuh/dashboard/honeypot-dashboard.ndjson)")
+    path = os.path.join(ROOT, "wazuh", "dashboard", "honeypot-dashboard.ndjson")
+    if not os.path.exists(path):
+        fail("honeypot-dashboard.ndjson absent (python3 tools/build_dashboard.py)")
+        return
+    objs = []
+    for i, ln in enumerate(open(path, encoding="utf-8"), 1):
+        try:
+            objs.append(json.loads(ln))
+        except ValueError as e:
+            fail(f"ligne {i} : JSON invalide ({e})")
+    ids = {(o["type"], o["id"]) for o in objs}
+    ok(f"{len(objs)} objets JSON valides")
+    dangling = [(o["id"], r["id"]) for o in objs for r in o.get("references", []) if (r["type"], r["id"]) not in ids]
+    ok("toutes les références (index pattern, visualisations) sont incluses") if not dangling         else fail(f"références absentes du fichier : {dangling}")
+    for o in objs:
+        for k in ("visState", "panelsJSON"):
+            if k in o["attributes"]:
+                try:
+                    json.loads(o["attributes"][k])
+                except ValueError:
+                    fail(f"{o['id']}: {k} n'est pas du JSON")
+    if not any(o["type"] == "dashboard" for o in objs):
+        fail("aucun objet dashboard")
+    r = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "build_dashboard.py"), "--check"])
+    ok("ndjson à jour avec tools/build_dashboard.py") if r.returncode == 0         else fail("ndjson pas à jour -> python3 tools/build_dashboard.py")
+    if "deploy/dashboard.sh" in read(SRV01):
+        ok("srv01.sh importe le dashboard (deploy/dashboard.sh)")
+    else:
+        fail("srv01.sh n'appelle pas deploy/dashboard.sh")
+
+
 def main():
     print(f"{B}Projet: {ROOT}{N}")
     t_bash()
@@ -584,6 +619,7 @@ def main():
     if "--no-app" not in sys.argv:
         t_app_live(dec, rules)
     t_hp_rules()
+    t_dashboard()
     if "--no-app" not in sys.argv:
         t_hp_live()
     print(f"\n{B}Résultat:{N} {G}{stats['ok']} OK{N}, {Y}{stats['warn']} WARN{N}, {R}{stats['fail']} FAIL{N}")
