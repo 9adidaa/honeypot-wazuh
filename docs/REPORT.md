@@ -622,16 +622,16 @@ fields from the honey pot access log:
 <decoder name="hp-access">
   <prematch>HONEYPOT-ACCESS </prematch>
   <regex>src=(\S+) method=(\S+) path=(\S+) status=(\d+) body=(\S+) ua=(\S+)</regex>
-  <order>hpsrc,hpmethod,hppath,hpstatus,hpbody,hpua</order>
+  <order>srcip,hpmethod,hppath,hpstatus,hpbody,hpua</order>
 </decoder>
 ```
 
-The captured fields are `hpsrc`, `hpmethod`, `hppath`, `hpstatus`, `hpbody` and `hpua`, which the
+The captured fields are `srcip`, `hpmethod`, `hppath`, `hpstatus`, `hpbody` and `hpua`, which the
 detection rules below reference.
 
 | Field | Meaning |
 |-------|---------|
-| `hpsrc` | Source IP address |
+| `srcip` | Source IP address |
 | `hpmethod` | HTTP method |
 | `hppath` | Request path (with query string) |
 | `hpstatus` | HTTP response status |
@@ -978,7 +978,7 @@ pipeline (honey pot → agent → manager → alert) works end-to-end.
   },
   "agent": { "id": "001", "name": "NIX01" },
   "data": {
-    "hpsrc": "1.2.3.4", "hpmethod": "DELETE",
+    "srcip": "1.2.3.4", "hpmethod": "DELETE",
     "hppath": "/admin", "hpstatus": "200", "hpua": "curl"
   }
 }

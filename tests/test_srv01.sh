@@ -90,7 +90,7 @@ bf=$(for i in $(seq 1 10); do
        echo "HONEYPOT-ACCESS src=203.0.113.77 method=GET path=/bf$i status=404 body=- ua=gobuster-ish"
      done | timeout 90 "$LOGTEST" 2>&1)
 grep -qE "id: '100191'" <<<"$bf" && ok "brute_force_404    -> 100191" \
-  || fail "brute_force_404    -> 100191 jamais déclenchée (cause probable : le décodeur extrait 'hpsrc' et non 'srcip', donc <same_source_ip/> ne matche pas)"
+  || fail "brute_force_404    -> 100191 jamais déclenchée (vérifier que le décodeur extrait bien 'srcip')"
 
 # -----------------------------------------------------------------------------
 sec "5. Règles privesc (wazuh-logtest, événements auditd simulés)"

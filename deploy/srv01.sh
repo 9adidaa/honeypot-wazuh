@@ -35,7 +35,7 @@ cat > "$DECODER" <<'XML'
 <decoder name="hp-access">
   <prematch>HONEYPOT-ACCESS </prematch>
   <regex>src=(\S+) method=(\S+) path=(\S+) status=(\d+) body=(\S+) ua=(\S+)</regex>
-  <order>hpsrc,hpmethod,hppath,hpstatus,hpbody,hpua</order>
+  <order>srcip,hpmethod,hppath,hpstatus,hpbody,hpua</order>
 </decoder>
 XML
 
