@@ -38,6 +38,14 @@ capacité `CAP_NET_BIND_SERVICE`), un service systemd chacun, et écrivent un é
 
 ## État d'avancement
 
+**Vérifié de bout en bout sur le lab (VirtualBox + Vagrant, 2026-11-22)** :
+`vagrant up` nominal (dashboard importé, 3 services honeypot actifs) ; tests sans
+échec — `test_static.py` 75 OK / 0 FAIL, `test_nix01.sh` 61 OK / 0 FAIL,
+`wazuh-analysisd -t` OK, `test_srv01.sh` 70 OK / 0 FAIL, `--e2e` 74 OK / 0 FAIL,
+`--since` 71 OK / 0 FAIL ; attaques réelles depuis l'hôte Kali (nmap, nikto,
+sqlmap, hydra, redis-cli, ftp, `attack_demo.py`) toutes journalisées avec
+`srcip 192.168.56.1` et visibles dans le dashboard (voir [docs/DEMO.md](docs/DEMO.md)).
+
 **Terminé**
 - [x] Honeypot web *SweetBuzz Honey Co.* : SQLi, XSS stockée, contournement par la méthode HTTP ; journal `HONEYPOT-ACCESS src=… method=… path=… body=… ua=… xff=…` (IP source = pair TCP, non falsifiable)
 - [x] Honeypot SSH (port 2222) : faux shell interactif + `ssh host cmd`, identifiants, commandes, téléchargements
@@ -98,12 +106,20 @@ Ensuite :
 
 ## Démo
 
+**Script vidéo complet, pas à pas (commandes + alertes attendues) : [docs/DEMO.md](docs/DEMO.md).**
+
 ```bash
 # depuis le PC hôte (pip install paramiko) ou depuis SRV01 (vagrant ssh srv01)
 python3 tools/attack_demo.py --slow                 # web + SSH + FTP + Redis
 python3 tools/attack_demo.py --only ssh,redis       # un sous-ensemble
 vagrant ssh srv01 -c "sudo python3 /vagrant/tools/show_alerts.py --since 15"
+bash scripts/demo_reset.sh                           # vider les logs entre 2 prises
 ```
+
+Les attaques se lancent depuis le PC hôte (`192.168.56.1`) contre NIX01
+(`192.168.56.101`) : outils déjà installés sur Kali (nmap, nikto, sqlmap, hydra,
+redis-tools, ftp, sshpass, paramiko). Les honeypots SSH acceptent les clients
+libssh (hydra, medusa, ncrack…) en plus d'OpenSSH.
 
 | Commande | Effet |
 |---|---|
