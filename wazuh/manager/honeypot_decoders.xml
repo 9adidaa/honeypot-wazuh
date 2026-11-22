@@ -1,5 +1,5 @@
 <decoder name="hp-access">
   <prematch>HONEYPOT-ACCESS </prematch>
-  <regex>src=(\S+) method=(\S+) path=(\S+) status=(\d+) body=(\S+) ua=(\S+)</regex>
-  <order>srcip,hpmethod,hppath,hpstatus,hpbody,hpua</order>
+  <regex>src=(\S+) method=(\S+) path=(\S+) status=(\d+) body=(\S+) ua=(\S+) xff=(\S+)</regex>
+  <order>srcip,hpmethod,hppath,hpstatus,hpbody,hpua,hpxff</order>
 </decoder>

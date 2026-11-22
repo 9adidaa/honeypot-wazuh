@@ -327,7 +327,7 @@ def t_app_live(dec, rules):
         http(base, "GET", "/", headers={"X-Forwarded-For": "6.6.6.6"})
         time.sleep(0.05)
         last = open(logf).read().splitlines()[n_before:]
-        if last and "src=6.6.6.6" in last[-1]:
+        if last and " src=6.6.6.6 " in last[-1]:
             warn("IP falsifiable : un header X-Forwarded-For forgé remplace l'IP source dans les logs "
                  "(utiliser request.remote_addr)")
         else:

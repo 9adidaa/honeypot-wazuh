@@ -23,7 +23,7 @@ détection d'attaques et visualisation dans un dashboard web (Wazuh), déployée
 
 **Terminé**
 - [x] Honeypot web *SweetBuzz Honey Co.* (Flask) : SQLi, XSS stockée, contournement par la méthode HTTP
-- [x] Journalisation de chaque requête (`HONEYPOT-ACCESS src=… method=… path=… body=… ua=…`)
+- [x] Journalisation de chaque requête (`HONEYPOT-ACCESS src=… method=… path=… body=… ua=… xff=…`)
 - [x] Wazuh manager + agent, décodeur `hp-access`
 - [x] ~20 règles de détection : SQLi, XSS, injection de commande, scanners, fichiers sensibles, brute force, élévation de privilèges (auditd), intégrité des fichiers (FIM), avec mapping MITRE ATT&CK
 - [x] Scripts de déploiement idempotents `deploy/srv01.sh` et `deploy/nix01.sh`

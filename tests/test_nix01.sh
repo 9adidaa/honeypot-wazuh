@@ -47,7 +47,7 @@ sleep 1
 line=$(grep -- "$RUNID" "$ACCESS_LOG" | tail -1)
 if [[ -n "$line" ]]; then
   ok "requête de test journalisée"
-  if [[ "$line" =~ ^HONEYPOT-ACCESS\ src=[^\ ]+\ method=DELETE\ path=/admin\ status=[0-9]+\ body=[^\ ]+\ ua=[^\ ]+$ ]]; then
+  if [[ "$line" =~ ^HONEYPOT-ACCESS\ src=[^\ ]+\ method=DELETE\ path=/admin\ status=[0-9]+\ body=[^\ ]+\ ua=[^\ ]+\ xff=[^\ ]+$ ]]; then
     ok "format conforme au décodeur hp-access"
   else
     fail "format non conforme: $line"
@@ -62,7 +62,7 @@ else
 fi
 curl -s -o /dev/null -A "curl/8.5.0 $RUNID-xff" -H "X-Forwarded-For: 6.6.6.6" http://127.0.0.1:5000/
 sleep 1
-grep -- "$RUNID-xff" "$ACCESS_LOG" | grep -q "src=6.6.6.6" \
+grep -- "$RUNID-xff" "$ACCESS_LOG" | grep -q " src=6.6.6.6 " \
   && warn "IP source falsifiable via X-Forwarded-For" \
   || ok "IP source non falsifiable via X-Forwarded-For"
 

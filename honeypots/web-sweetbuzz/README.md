@@ -40,5 +40,5 @@ Every request is appended to `logs/access.log` in a token-safe, single-line form
 the Wazuh decoder `hp-access`:
 
 ```
-HONEYPOT-ACCESS src=<ip> method=<verb> path=<path> status=<code> body=<payload> ua=<user-agent>
+HONEYPOT-ACCESS src=<ip> method=<verb> path=<path> status=<code> body=<payload> ua=<user-agent> xff=<X-Forwarded-For|->
 ```

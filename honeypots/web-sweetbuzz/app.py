@@ -420,7 +420,10 @@ def _field(s, n=1200):
 @app.after_request
 def _hp_access_log(resp):
     try:
-        src = request.headers.get("X-Forwarded-For", request.remote_addr) or "-"
+        # src = real TCP peer (not spoofable); X-Forwarded-For is attacker-controlled,
+        # so it is only logged for information in its own field
+        src = request.remote_addr or "-"
+        xff = request.headers.get("X-Forwarded-For", "")
         q = request.query_string.decode("utf-8", "replace")
         body = ""
         if request.method in ("POST", "PUT", "PATCH", "DELETE"):
@@ -436,9 +439,10 @@ def _hp_access_log(resp):
         # decode once so detection rules see plaintext keywords, then re-encode safely
         plain = _uq(str(payload))
         line = (
-            "HONEYPOT-ACCESS src=%s method=%s path=%s status=%d body=%s ua=%s\n"
-            % (src.split(",")[0].strip(), request.method, _field(path),
-               resp.status_code, _field(plain) or "-", _field(request.user_agent.string, 200))
+            "HONEYPOT-ACCESS src=%s method=%s path=%s status=%d body=%s ua=%s xff=%s\n"
+            % (src, request.method, _field(path),
+               resp.status_code, _field(plain) or "-", _field(request.user_agent.string, 200) or "-",
+               _field(xff, 200) or "-")
         )
         os.makedirs(os.path.dirname(_ACCESS_LOG), exist_ok=True)
         with open(_ACCESS_LOG, "a") as _f:

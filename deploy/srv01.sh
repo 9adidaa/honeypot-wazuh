@@ -34,8 +34,8 @@ log "Installing custom decoder -> $DECODER"
 cat > "$DECODER" <<'XML'
 <decoder name="hp-access">
   <prematch>HONEYPOT-ACCESS </prematch>
-  <regex>src=(\S+) method=(\S+) path=(\S+) status=(\d+) body=(\S+) ua=(\S+)</regex>
-  <order>srcip,hpmethod,hppath,hpstatus,hpbody,hpua</order>
+  <regex>src=(\S+) method=(\S+) path=(\S+) status=(\d+) body=(\S+) ua=(\S+) xff=(\S+)</regex>
+  <order>srcip,hpmethod,hppath,hpstatus,hpbody,hpua,hpxff</order>
 </decoder>
 XML
 
@@ -273,7 +273,7 @@ done
 # -----------------------------------------------------------------------------
 log "Decoder/rule smoke test:"
 SMOKE_IN="$(mktemp)"
-printf "HONEYPOT-ACCESS src=1.2.3.4 method=DELETE path=/admin status=200 body=- ua=curl\n" > "$SMOKE_IN"
+printf "HONEYPOT-ACCESS src=1.2.3.4 method=DELETE path=/admin status=200 body=- ua=curl xff=-\n" > "$SMOKE_IN"
 smoke_out=$(/var/ossec/bin/wazuh-logtest -v < "$SMOKE_IN" 2>&1 || true)
 rm -f "$SMOKE_IN"
 

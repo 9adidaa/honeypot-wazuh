@@ -75,7 +75,7 @@ fi
 
 # -----------------------------------------------------------------------------
 sec "4. Règles web (wazuh-logtest, sans trafic)"
-dec=$(logtest_decoder "HONEYPOT-ACCESS src=203.0.113.50 method=GET path=/ status=200 body=- ua=curl")
+dec=$(logtest_decoder "HONEYPOT-ACCESS src=203.0.113.50 method=GET path=/ status=200 body=- ua=curl xff=-")
 [[ "$dec" == "hp-access" ]] && ok "décodeur hp-access reconnu" || fail "décodeur: '$dec' (attendu hp-access)"
 
 while IFS=$'\t' read -r name exp method path data ua logline; do
@@ -87,7 +87,7 @@ done < "$CASES"
 
 # Brute force : 10 x 404 depuis la même IP dans la même session logtest
 bf=$(for i in $(seq 1 10); do
-       echo "HONEYPOT-ACCESS src=203.0.113.77 method=GET path=/bf$i status=404 body=- ua=gobuster-ish"
+       echo "HONEYPOT-ACCESS src=203.0.113.77 method=GET path=/bf$i status=404 body=- ua=gobuster-ish xff=-"
      done | timeout 90 "$LOGTEST" 2>&1)
 grep -qE "id: '100191'" <<<"$bf" && ok "brute_force_404    -> 100191" \
   || fail "brute_force_404    -> 100191 jamais déclenchée (vérifier que le décodeur extrait bien 'srcip')"
