@@ -5,7 +5,8 @@ After=network.target
 [Service]
 User=nix01
 WorkingDirectory=/home/nix01/honeypot_app
-ExecStart=/home/nix01/honeypot_app/venv/bin/python app.py
+EnvironmentFile=/etc/honeypots/sweetbuzz.env
+ExecStart=/home/nix01/honeypot_app/venv/bin/gunicorn --workers 2 --bind 0.0.0.0:5000 app:app
 Restart=always
 
 [Install]

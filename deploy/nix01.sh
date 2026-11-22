@@ -80,31 +80,29 @@ mkdir -p "$APPDIR/logs"
 : >> "$ACCESS_LOG"
 chown -R nix01:nix01 "$APPDIR/logs"
 
-# --- venv + requirements ----------------------------------------------------
+# --- secret (outside the FIM-monitored app dir, never in git) -------------
+ENV_FILE="/etc/honeypots/sweetbuzz.env"
+mkdir -p /etc/honeypots
+if [[ ! -s "$ENV_FILE" ]]; then
+  log "Generating Flask secret -> $ENV_FILE"
+  umask 077
+  printf 'HP_SECRET_KEY=%s\n' "$(openssl rand -hex 32)" > "$ENV_FILE"
+  umask 022
+fi
+chown root:nix01 "$ENV_FILE"; chmod 640 "$ENV_FILE"
+
+# --- venv + requirements (flask + gunicorn) --------------------------------
 if [[ ! -x "$APPDIR/venv/bin/python" ]]; then
-  log "Creating virtualenv and installing Flask"
+  log "Creating virtualenv"
   sudo -u nix01 python3 -m venv "$APPDIR/venv"
 fi
+install -m 644 -o nix01 -g nix01 "$REPO_DIR/honeypots/web-sweetbuzz/requirements.txt" "$APPDIR/requirements.txt"
 sudo -u nix01 "$APPDIR/venv/bin/pip" install -q --upgrade pip >/dev/null 2>&1 || true
-echo "flask==3.0.2" > "$APPDIR/requirements.txt"
 sudo -u nix01 "$APPDIR/venv/bin/pip" install -q -r "$APPDIR/requirements.txt"
 
-# --- systemd service --------------------------------------------------------
+# --- systemd service (gunicorn, not the Flask dev server) -------------------
 log "Installing honeypot.service"
-cat > /etc/systemd/system/honeypot.service <<'UNIT'
-[Unit]
-Description=SweetBuzz Honey Pot Web App
-After=network.target
-
-[Service]
-User=nix01
-WorkingDirectory=/home/nix01/honeypot_app
-ExecStart=/home/nix01/honeypot_app/venv/bin/python app.py
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-UNIT
+install -m 644 "$REPO_DIR/honeypots/web-sweetbuzz/honeypot.service" /etc/systemd/system/honeypot.service
 systemctl daemon-reload
 systemctl enable --now honeypot.service
 systemctl restart honeypot.service
@@ -251,4 +249,5 @@ sleep 5
 log "Agent status: $(systemctl is-active wazuh-agent)"
 log "Done. Verify the agent is Active on the manager:"
 echo "    ssh srv01@$MANAGER_IP  'sudo /var/ossec/bin/agent_control -l'"
-log "Honeypot app: http://$(hostname -I | awk '{print $1}'):5000/"
+HP_IP="$(ip -4 route get "$MANAGER_IP" 2>/dev/null | grep -oP 'src \K\S+' || hostname -I | awk '{print $1}')"
+log "Honeypot app: http://${HP_IP}:5000/"

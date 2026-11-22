@@ -17,8 +17,8 @@ detection platform. **Do not expose this application to the internet.**
 |------|---------|
 | `app.py` | The application (includes the Wazuh access-log hook) |
 | `deploy.sh` | Installs dependencies, creates a venv, registers `honeypot.service` |
-| `requirements.txt` | Python dependency (`flask==3.0.2`) |
-| `honeypot.service` | systemd unit (reference copy) |
+| `requirements.txt` | Python dependencies (`flask==3.0.2`, `gunicorn`) |
+| `honeypot.service` | systemd unit (gunicorn, secret from `/etc/honeypots/sweetbuzz.env`) — installed by `deploy/nix01.sh` |
 
 Sample captured log: [`docs/samples/access.log`](../../docs/samples/access.log)
 

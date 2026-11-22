@@ -3,7 +3,8 @@ import sqlite3
 import os
 
 app = Flask(__name__)
-app.secret_key = 'super_secret_honeypot_key'
+# Secret generated at deploy time (/etc/honeypots/sweetbuzz.env, see deploy/nix01.sh)
+app.secret_key = os.environ.get('HP_SECRET_KEY') or os.urandom(32).hex()
 
 DB_PATH = 'honeypot.db'
 
@@ -31,6 +32,9 @@ def init_db():
         cursor.execute("INSERT INTO users (username, password, is_admin) VALUES ('customer', 'sweettooth123', 0)")
     conn.commit()
     conn.close()
+
+# also needed when served by gunicorn (no __main__)
+init_db()
 
 BASE_STYLE = """
 <style>
