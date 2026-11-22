@@ -38,7 +38,7 @@ WEBAPP = "honeypots/web-sweetbuzz"
 DECODERS, RULES = "wazuh/manager/honeypot_decoders.xml", "wazuh/manager/honeypot_rules.xml"
 SVC_RULES = "wazuh/manager/honeypot_services_rules.xml"
 HP_CASES = os.path.join(ROOT, "tests", "hp_cases.tsv")
-BUILTIN_PARENTS = {"80700", "550", "554", "86600"}  # règles Wazuh natives (auditd, syscheck, json/suricata)
+BUILTIN_PARENTS = {"80700", "92600", "550", "554", "86600"}  # règles Wazuh natives (auditd, audit_detections python, syscheck, json/suricata)
 
 G, R, Y, B, N = "\033[32m", "\033[31m", "\033[33m", "\033[1m", "\033[0m"
 stats = {"ok": 0, "fail": 0, "warn": 0}

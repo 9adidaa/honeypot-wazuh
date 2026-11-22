@@ -142,13 +142,13 @@ cat > "$RULES" <<'XML'
 <group name="honeypot,linux,privilege_escalation,">
 
   <rule id="100200" level="3">
-    <if_sid>80700</if_sid>
+    <if_sid>80700,92600</if_sid>
     <field name="audit.key" type="pcre2">^hp_</field>
     <description>Honeypot audit event (key match)</description>
   </rule>
 
   <rule id="100210" level="8">
-    <if_sid>80700</if_sid>
+    <if_sid>80700,92600</if_sid>
     <field name="audit.key" type="pcre2">^hp_identity$</field>
     <description>Identity file modified (/etc/passwd|shadow|group|gshadow) - possible privesc backdoor</description>
     <mitre><id>T1136.001</id></mitre>
@@ -156,7 +156,7 @@ cat > "$RULES" <<'XML'
   </rule>
 
   <rule id="100211" level="10">
-    <if_sid>80700</if_sid>
+    <if_sid>80700,92600</if_sid>
     <field name="audit.key" type="pcre2">^hp_sudoers$</field>
     <description>Sudoers configuration modified - possible privilege escalation</description>
     <mitre><id>T1548.003</id></mitre>
@@ -164,7 +164,7 @@ cat > "$RULES" <<'XML'
   </rule>
 
   <rule id="100212" level="10">
-    <if_sid>80700</if_sid>
+    <if_sid>80700,92600</if_sid>
     <field name="audit.key" type="pcre2">^hp_cron$</field>
     <description>Cron configuration modified - possible persistence/privesc</description>
     <mitre><id>T1053.003</id></mitre>
@@ -172,7 +172,7 @@ cat > "$RULES" <<'XML'
   </rule>
 
   <rule id="100213" level="12">
-    <if_sid>80700</if_sid>
+    <if_sid>80700,92600</if_sid>
     <field name="audit.key" type="pcre2">^hp_preload$</field>
     <description>ld.so.preload modified - LD_PRELOAD rootkit/privesc attempt</description>
     <mitre><id>T1574.006</id></mitre>
@@ -180,7 +180,7 @@ cat > "$RULES" <<'XML'
   </rule>
 
   <rule id="100214" level="10">
-    <if_sid>80700</if_sid>
+    <if_sid>80700,92600</if_sid>
     <field name="audit.key" type="pcre2">^hp_exec$</field>
     <description>Privileged command executed (sudo/su/passwd/usermod/groupmod)</description>
     <mitre><id>T1548</id></mitre>
@@ -188,7 +188,7 @@ cat > "$RULES" <<'XML'
   </rule>
 
   <rule id="100215" level="10">
-    <if_sid>80700</if_sid>
+    <if_sid>80700,92600</if_sid>
     <field name="audit.key" type="pcre2">^hp_setuid$|^hp_setgid$|^hp_capset$</field>
     <description>setuid/setgid/capability change by non-root - privesc indicator</description>
     <mitre><id>T1548.001</id></mitre>
@@ -196,7 +196,7 @@ cat > "$RULES" <<'XML'
   </rule>
 
   <rule id="100216" level="12">
-    <if_sid>80700</if_sid>
+    <if_sid>80700,92600</if_sid>
     <field name="audit.key" type="pcre2">^hp_ptrace$</field>
     <description>ptrace by non-root user - process injection / privesc indicator</description>
     <mitre><id>T1055</id></mitre>
@@ -204,7 +204,7 @@ cat > "$RULES" <<'XML'
   </rule>
 
   <rule id="100217" level="12">
-    <if_sid>80700</if_sid>
+    <if_sid>80700,92600</if_sid>
     <field name="audit.key" type="pcre2">^hp_mount$|^hp_module$</field>
     <description>Mount / kernel module operation by non-root - privesc indicator</description>
     <mitre><id>T1548.002</id></mitre>
@@ -212,7 +212,7 @@ cat > "$RULES" <<'XML'
   </rule>
 
   <rule id="100218" level="8">
-    <if_sid>80700</if_sid>
+    <if_sid>80700,92600</if_sid>
     <field name="audit.key" type="pcre2">^hp_find$</field>
     <description>find executed - possible SUID enumeration / privesc recon</description>
     <mitre><id>T1083</id></mitre>

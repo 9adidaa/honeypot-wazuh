@@ -7,7 +7,7 @@
 #                                               #   FTP, Redis via tools/attack_demo.py) -> alertes
 #   sudo bash tests/test_srv01.sh --since 10    # alertes privesc/FIM des 10 dernières min
 #                                               # (après test_nix01.sh --trigger)
-# Env: NIX01_IP (défaut 192.168.56.101), AGENT_NAME (défaut NIX01)
+# Env: NIX01_IP (défaut 192.168.56.101), AGENT_NAME (défaut nix01)
 # =============================================================================
 set -uo pipefail
 
@@ -16,7 +16,7 @@ CASES="$HERE/cases.tsv"
 HP_CASES="$HERE/hp_cases.tsv"
 ATTACK="$HERE/../tools/attack_demo.py"
 NIX01_IP="${NIX01_IP:-192.168.56.101}"
-AGENT_NAME="${AGENT_NAME:-NIX01}"
+AGENT_NAME="${AGENT_NAME:-nix01}"
 OSSEC=/var/ossec
 ALERTS="$OSSEC/logs/alerts/alerts.json"
 LOGTEST="$OSSEC/bin/wazuh-logtest"
@@ -91,7 +91,7 @@ done < "$CASES"
 
 # Brute force : 10 x 404 depuis la même IP dans la même session logtest
 bf=$(for i in $(seq 1 10); do
-       echo "HONEYPOT-ACCESS src=203.0.113.77 method=GET path=/bf$i status=404 body=- ua=gobuster-ish xff=-"
+       echo "HONEYPOT-ACCESS src=203.0.113.77 method=GET path=/bf$i status=404 body=- ua=curl/8.5.0 xff=-"
      done | timeout 90 "$LOGTEST" 2>&1)
 grep -qE "id: '100191'" <<<"$bf" && ok "brute_force_404    -> 100191" \
   || fail "brute_force_404    -> 100191 jamais déclenchée (vérifier que le décodeur extrait bien 'srcip')"
