@@ -8,3 +8,6 @@
 *.service text eol=lf
 Vagrantfile text eol=lf
 *.png binary
+*.txt     text eol=lf
+*.json    text eol=lf
+*.ndjson  text eol=lf

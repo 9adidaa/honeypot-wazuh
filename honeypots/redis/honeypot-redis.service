@@ -1,0 +1,20 @@
+[Unit]
+Description=Redis honeypot (RESP, port 6379)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=honeypot
+Group=honeypot
+Environment=HP_LOG_DIR=/var/log/honeypots HP_DATA_DIR=/var/lib/honeypots HP_REDIS_PORT=6379
+ExecStart=/opt/honeypots/venv/bin/python /opt/honeypots/redis_honeypot.py
+Restart=always
+RestartSec=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/log/honeypots /var/lib/honeypots
+
+[Install]
+WantedBy=multi-user.target
