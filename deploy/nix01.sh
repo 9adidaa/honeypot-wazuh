@@ -12,7 +12,7 @@
 #
 # Idempotent: safe to re-run. Backs up existing files before overwriting.
 #
-# Usage:  sudo bash setup-nix01.sh
+# Usage:  sudo bash deploy/nix01.sh   (from a checkout of the repository)
 # Env:    MANAGER_IP (default 192.168.56.102), AGENT_NAME (default NIX01)
 # =============================================================================
 set -euo pipefail
@@ -26,6 +26,7 @@ ACCESS_LOG="$APPDIR/logs/access.log"
 AUDIT_RULES="/etc/audit/rules.d/honeypot-privesc.rules"
 AGENT_CONF="/var/ossec/etc/ossec.conf"
 STAMP="$(date +%Y%m%d-%H%M%S)"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 log()  { echo -e "\e[1;32m[+]\e[0m $*"; }
 warn() { echo -e "\e[1;33m[!]\e[0m $*"; }
@@ -62,201 +63,19 @@ mkdir -p "$APPDIR/logs"
 chown -R nix01:nix01 "$APPDIR" 2>/dev/null || true
 
 # --- app.py -----------------------------------------------------------------
-# Deploy the SweetBuzz honeypot if it isn't already present. The app contains
-# three intentional vulnerabilities (SQLi login, DELETE /admin, stored XSS).
-if [[ ! -f "$APPDIR/app.py" ]]; then
-  log "Writing $APPDIR/app.py (SweetBuzz honeypot)"
-  cat > "$APPDIR/app.py" <<'PYEOF'
-from flask import Flask, request, render_template_string, redirect, url_for, session
-import sqlite3
-import os
-
-app = Flask(__name__)
-app.secret_key = 'super_secret_honeypot_key'
-
-DB_PATH = 'honeypot.db'
-
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, password TEXT, is_admin INTEGER)''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS feedback (
-        id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, comment TEXT)''')
-    cursor.execute("SELECT COUNT(*) FROM users WHERE username='admin'")
-    if cursor.fetchone()[0] == 0:
-        cursor.execute("INSERT INTO users (username, password, is_admin) VALUES ('admin', 'HoneyMaster2026!', 1)")
-    conn.commit()
-    conn.close()
-
-STYLE = """
-<style>
-  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; background:#fff8e7; color:#3a2a12; margin:0; }
-  header { background:linear-gradient(90deg,#f0a500,#ffd166); padding:24px; text-align:center; }
-  header h1 { margin:0; }
-  .wrap { max-width:760px; margin:32px auto; background:#fff; padding:28px; border-radius:12px;
-          box-shadow:0 2px 10px rgba(0,0,0,.08); }
-  input, textarea, button { font-size:16px; padding:10px; margin:6px 0; width:100%; box-sizing:border-box; }
-  button { background:#f0a500; border:0; color:#fff; font-weight:600; cursor:pointer; border-radius:8px; }
-  a { color:#c47f00; }
-</style>
-"""
-
-@app.route('/')
-def index():
-    html = STYLE + """
-    <header><h1>SweetBuzz Honey Co.</h1><p>Artisanal honey, delivered with a sting.</p></header>
-    <div class="wrap">
-      <h2>Welcome to our hive!</h2>
-      <p>Browse our artisanal honeys, leave a review, or sign in to your account.</p>
-      <ul>
-        <li><a href="/login">Customer Login</a></li>
-        <li><a href="/feedback">Reviews</a></li>
-        <li><a href="/admin">Admin Panel</a></li>
-      </ul>
-    </div>"""
-    return render_template_string(html)
-
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    error = None
-    if request.method == 'POST':
-        username = request.form.get('username', '')
-        password = request.form.get('password', '')
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        # VULNERABLE SQL QUERY (SQLi)
-        query = f"SELECT id, username, is_admin FROM users WHERE username = '{username}' AND password = '{password}'"
-        try:
-            cursor.execute(query)
-            user = cursor.fetchone()
-        except Exception as e:
-            user = None
-            error = "Database error"
-        conn.close()
-        if user:
-            session['user'] = user[1]
-            return render_template_string(STYLE + """
-              <header><h1>VIP Dashboard</h1></header>
-              <div class="wrap"><h2>Welcome, {{ u }}!</h2>
-              <p>Flag: <code>CODEBY{HONEYPOT_SQLI_BYPASS_SUCCESS}</code></p></div>""", u=user[1])
-        error = error or "Invalid credentials"
-    html = STYLE + """
-    <header><h1>Customer Login</h1></header>
-    <div class="wrap">
-      <form method="post">
-        <input name="username" placeholder="Username">
-        <input name="password" type="password" placeholder="Password">
-        <button type="submit">Sign In</button>
-      </form>
-      {% if error %}<p style="color:#b00">{{ error }}</p>{% endif %}
-    </div>"""
-    return render_template_string(html, error=error)
-
-@app.route('/admin', methods=['GET', 'POST', 'PUT', 'DELETE'])
-def admin():
-    if request.method == 'GET':
-        return render_template_string(STYLE + """
-        <header><h1>Admin Panel</h1></header>
-        <div class="wrap">
-          <form method="post">
-            <input name="password" type="password" placeholder="Admin Password">
-            <button type="submit">Authenticate</button>
-          </form>
-        </div>""")
-    elif request.method == 'POST':
-        return render_template_string(STYLE + "<div class='wrap'><h2>Access Denied</h2></div>"), 403
-    elif request.method == 'DELETE':
-        # Method Tampering Bypass!
-        return "<h1>Admin Authorization Bypassed. Flag: CODEBY{METHOD_TAMPERING_MASTER}</h1>"
-
-@app.route('/feedback', methods=['GET', 'POST'])
-def feedback():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    if request.method == 'POST':
-        name = request.form.get('name', 'Anonymous')
-        comment = request.form.get('comment', '')
-        cursor.execute("INSERT INTO feedback (name, comment) VALUES (?, ?)", (name, comment))
-        conn.commit()
-    cursor.execute("SELECT name, comment FROM feedback ORDER BY id DESC")
-    feedbacks = cursor.fetchall()
-    conn.close()
-    html = STYLE + """
-    <header><h1>Customer Reviews</h1></header>
-    <div class="wrap">
-      <form method="post">
-        <input name="name" placeholder="Your name">
-        <textarea name="comment" placeholder="Your review"></textarea>
-        <button type="submit">Post Review</button>
-      </form>
-      <hr>
-      {% for f in feedbacks %}
-        <h4>{{ f[0] }}</h4>
-        <p>{{ f[1]|safe }}</p>
-      {% endfor %}
-    </div>"""
-    return render_template_string(html, feedbacks=feedbacks)
-
-# === Wazuh honeypot access logging (live capture) ===
-import re as _re
-from urllib.parse import unquote_plus as _uq
-_ACCESS_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "access.log")
-
-def _field(s, n=1200):
-    s = _re.sub(r"[^\x20-\x7e]", "?", str(s))
-    s = _re.sub(r"\s+", " ", s).strip()
-    s = s.replace('%', '%25').replace(' ', '+').replace('"', '%22')
-    return s[:n]
-
-@app.after_request
-def _hp_access_log(resp):
-    try:
-        src = request.headers.get("X-Forwarded-For", request.remote_addr) or "-"
-        q = request.query_string.decode("utf-8", "replace")
-        body = ""
-        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
-            try:
-                if request.form:
-                    body = "&".join("%s=%s" % (k, v) for k, v in request.form.items())
-                else:
-                    body = request.get_data(cache=True, as_text=True)[:1500] or ""
-            except Exception:
-                body = ""
-        path = request.path + ("?" + q if q else "")
-        payload = body if body else q
-        # decode once so detection rules see plaintext keywords, then re-encode safely
-        plain = _uq(str(payload))
-        line = (
-            "HONEYPOT-ACCESS src=%s method=%s path=%s status=%d body=%s ua=%s\n"
-            % (src.split(",")[0].strip(), request.method, _field(path),
-               resp.status_code, _field(plain) or "-", _field(request.user_agent.string, 200))
-        )
-        os.makedirs(os.path.dirname(_ACCESS_LOG), exist_ok=True)
-        with open(_ACCESS_LOG, "a") as _f:
-            _f.write(line)
-    except Exception as _e:
-        try:
-            os.makedirs(os.path.dirname(_ACCESS_LOG), exist_ok=True)
-            with open(_ACCESS_LOG + ".err", "a") as _ef:
-                _ef.write("ERR %r\n" % (_e,))
-        except Exception:
-            pass
-    return resp
-
-
-if __name__ == '__main__':
-    init_db()
-    app.run(host='0.0.0.0', port=5000, debug=False)
-PYEOF
+# Single source of truth: honeypots/web-sweetbuzz/app.py from this repository
+# (/opt/honeypot-wazuh when provisioned by Vagrant). The app contains three
+# intentional vulnerabilities (SQLi login, DELETE /admin, stored XSS).
+APP_SRC="$REPO_DIR/honeypots/web-sweetbuzz/app.py"
+[[ -f "$APP_SRC" ]] || die "app.py introuvable: $APP_SRC"
+if ! cmp -s "$APP_SRC" "$APPDIR/app.py"; then
+  [[ -f "$APPDIR/app.py" ]] && cp -a "$APPDIR/app.py" "$APPDIR/app.py.bak.${STAMP}"
+  log "Installing $APPDIR/app.py from $APP_SRC"
+  install -m 644 -o nix01 -g nix01 "$APP_SRC" "$APPDIR/app.py"
 else
-  log "$APPDIR/app.py already present — ensuring access-log hook exists"
-  if ! grep -q "_hp_access_log" "$APPDIR/app.py"; then
-    warn "Access-log hook missing; app.py was not overwritten. Add it manually or delete app.py and re-run."
-  fi
+  log "$APPDIR/app.py already up to date"
 fi
 
-chown nix01:nix01 "$APPDIR/app.py"
 mkdir -p "$APPDIR/logs"
 : >> "$ACCESS_LOG"
 chown -R nix01:nix01 "$APPDIR/logs"

@@ -9,7 +9,7 @@ Vérifie :
   1. syntaxe des scripts bash (bash -n, + shellcheck si présent)
   2. XML des décodeurs/règles + cohérence wazuh/manager/ <-> deploy/srv01.sh
   3. IDs de règles uniques, parents (if_sid) existants, clés auditd cohérentes
-  4. app.py compile + identique à la version embarquée dans nix01.sh
+  4. app.py compile + installé par nix01.sh depuis honeypots/web-sweetbuzz/
   5. appli lancée pour de vrai : chaque attaque de cases.tsv produit la bonne
      ligne HONEYPOT-ACCESS, le décodeur la parse, la règle attendue matche
   6. contrôles sécu (falsification IP via X-Forwarded-For, secrets en dur)
@@ -195,16 +195,13 @@ def t_app_code():
     r = subprocess.run([sys.executable, "-m", "py_compile", p], capture_output=True, text=True)
     ok("app.py compile") if r.returncode == 0 else fail(f"app.py ne compile pas: {r.stderr}")
 
-    emb = heredoc(NIX01, 'cat > "$APPDIR/app.py"', end="PYEOF")
-    if not emb:
-        warn("app.py non trouvé dans nix01.sh (comparaison sautée)")
+    nix = read(NIX01)
+    if "<<'PYEOF'" in nix:
+        fail("deploy/nix01.sh embarque encore une copie de app.py (heredoc PYEOF)")
+    elif "honeypots/web-sweetbuzz/app.py" in nix:
+        ok("deploy/nix01.sh installe honeypots/web-sweetbuzz/app.py (source unique)")
     else:
-        local = read(f"{WEBAPP}/app.py")
-        norm = lambda s: re.sub(r"\s+", "", s)  # noqa: E731
-        if norm(local) == norm(emb) or norm(emb) in norm(local):
-            ok("app.py embarqué dans deploy/nix01.sh == honeypots/web-sweetbuzz/app.py")
-        else:
-            warn("app.py embarqué dans deploy/nix01.sh != honeypots/web-sweetbuzz/app.py (deux versions de l'appli)")
+        fail("deploy/nix01.sh n'installe pas honeypots/web-sweetbuzz/app.py")
 
     src = read(f"{WEBAPP}/app.py") + read(NIX01) + read(SRV01)
     for pat, msg in [(r"secret_key\s*=\s*['\"]", "secret_key Flask en dur dans app.py"),
