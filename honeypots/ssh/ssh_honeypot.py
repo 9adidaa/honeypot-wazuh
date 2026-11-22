@@ -342,7 +342,18 @@ def handle(sock, addr, host_key, slots):
     t = None
     try:
         LOG.log("connection", ctx["ip"], ctx["port"], ctx["sid"], dst_port=PORT)
-        t = paramiko.Transport(sock)
+        # Un honeypot DOIT accepter les clients des attaquants. Deux ajustements du
+        # transport paramiko pour que libssh (hydra, medusa, ncrack, metasploit)
+        # réussisse le handshake, sans casser OpenSSH :
+        #  - strict_kex=False : désactive la contre-mesure Terrapin (kex-strict) que
+        #    libssh négocie d'une manière rejetée par paramiko (MessageOrderError).
+        #  - disabled_algorithms : on retire les kex Diffie-Hellman (group-exchange et
+        #    groupes fixes) ; il reste curve25519 + ECDH. Cela évite un désaccord de
+        #    négociation (paramiko attend le paquet 30/ECDH, libssh envoie 34/DH-GEX).
+        t = paramiko.Transport(sock, strict_kex=False, disabled_algorithms={"kex": [
+            "diffie-hellman-group16-sha512", "diffie-hellman-group-exchange-sha256",
+            "diffie-hellman-group14-sha256", "diffie-hellman-group-exchange-sha1",
+            "diffie-hellman-group14-sha1", "diffie-hellman-group1-sha1"]})
         ctx["transport"] = t
         t.local_version = BANNER
         t.add_server_key(host_key)
