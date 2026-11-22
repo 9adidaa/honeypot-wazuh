@@ -67,6 +67,57 @@ grep -- "$RUNID-xff" "$ACCESS_LOG" | grep -q " src=6.6.6.6 " \
   || ok "IP source non falsifiable via X-Forwarded-For"
 
 # -----------------------------------------------------------------------------
+sec "2b. Honeypots SSH / FTP / Redis"
+HPLOG=/var/log/honeypots
+check "utilisateur système honeypot"      id honeypot
+check "logrotate configuré"               test -f /etc/logrotate.d/honeypots
+# probe = octets envoyés après connexion ; banner = début de réponse attendu
+for spec in "ssh 2222 - SSH-2.0-OpenSSH" "ftp 21 QUIT\r\n 220" "redis 6379 PING\r\n +PONG"; do
+  read -r hp port probe banner <<<"$spec"
+  svc="honeypot-$hp.service"
+  check "$svc actif"                      systemctl is-active --quiet "$svc"
+  check "$svc activé au boot"             systemctl is-enabled --quiet "$svc"
+  check "port $port en écoute ($hp)"      bash -c "ss -ltn | grep -q ':$port '"
+  pid=$(systemctl show -p MainPID --value "$svc")
+  if [[ -n "$pid" && "$pid" != 0 ]] && [[ "$(ps -o user= -p "$pid")" == "honeypot" ]]; then
+    ok "$hp lancé en tant que honeypot (pas root)"
+  else
+    fail "$hp : processus absent ou pas lancé en honeypot (pid=$pid)"
+  fi
+  before=$(wc -l < "$HPLOG/$hp.json" 2>/dev/null || echo 0)
+  got=$(timeout 6 python3 - "$port" "$probe" <<'PY' 2>/dev/null
+import socket, sys, time
+s = socket.create_connection(("127.0.0.1", int(sys.argv[1])), 5)
+if sys.argv[2] != "-":
+    s.sendall(sys.argv[2].encode().decode("unicode_escape").encode())
+time.sleep(0.5)
+print(s.recv(200).decode("utf-8", "replace").splitlines()[0])
+s.close()
+PY
+)
+  [[ "$got" == "$banner"* ]] && ok "$hp répond (« ${got:0:40} »)" || fail "$hp : réponse inattendue « ${got:-rien} » (attendu $banner…)"
+  sleep 1
+  if python3 - "$HPLOG/$hp.json" "$before" "$hp" <<'PY'
+import json, sys
+path, before, hp = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+lines = open(path).read().splitlines()[before:]
+evs = [json.loads(l) for l in lines]
+need = ("timestamp", "honeypot", "event_type", "srcip", "src_port", "session")
+assert any(e["event_type"] == "connection" and e["srcip"] == "127.0.0.1" and e["honeypot"] == hp
+           and all(k in e for k in need) for e in evs), evs
+PY
+  then ok "$hp.json : événement connection JSON valide (srcip, session...)"
+  else fail "$hp.json : pas d'événement connection valide après la sonde"
+  fi
+done
+ftp_pid=$(systemctl show -p MainPID --value honeypot-ftp.service)
+if [[ -n "$ftp_pid" && "$ftp_pid" != 0 ]] && grep -qE "^CapAmb:\s*0*400$" "/proc/$ftp_pid/status"; then
+  ok "FTP : seule capacité CAP_NET_BIND_SERVICE (port 21 sans root)"
+else
+  warn "FTP : capacités inattendues ($(grep CapAmb "/proc/$ftp_pid/status" 2>/dev/null))"
+fi
+
+# -----------------------------------------------------------------------------
 sec "3. auditd (élévation de privilèges)"
 check "auditd actif"                      systemctl is-active --quiet auditd
 check "fichier de règles présent"         test -f /etc/audit/rules.d/honeypot-privesc.rules
@@ -88,6 +139,7 @@ grep -q "<address>$MANAGER_IP</address>" "$AGENT_CONF" \
 check "manager joignable sur 1514/tcp"    timeout 3 bash -c "</dev/tcp/$MANAGER_IP/1514"
 check "localfile access.log configuré"    grep -q "$ACCESS_LOG" "$AGENT_CONF"
 check "localfile audit.log configuré"     grep -q "/var/log/audit/audit.log" "$AGENT_CONF"
+check "localfile JSON honeypots configuré" grep -q "<location>/var/log/honeypots/\*.json</location>" "$AGENT_CONF"
 check "FIM realtime sur honeypot_app"     grep -q "realtime=\"yes\"[^>]*>$APPDIR" "$AGENT_CONF"
 grep -q "ERROR" <(tail -200 /var/ossec/logs/ossec.log 2>/dev/null) \
   && warn "erreurs récentes dans /var/ossec/logs/ossec.log: $(grep ERROR /var/ossec/logs/ossec.log | tail -1)" \

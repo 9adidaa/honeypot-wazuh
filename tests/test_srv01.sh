@@ -3,7 +3,8 @@
 # test_srv01.sh — vérifie le manager Wazuh (SRV01) + les règles du honeypot
 #
 #   sudo bash tests/test_srv01.sh               # services + règles (wazuh-logtest)
-#   sudo bash tests/test_srv01.sh --e2e         # + vraies attaques sur NIX01 -> alertes
+#   sudo bash tests/test_srv01.sh --e2e         # + vraies attaques sur NIX01 (web, SSH,
+#                                               #   FTP, Redis via tools/attack_demo.py) -> alertes
 #   sudo bash tests/test_srv01.sh --since 10    # alertes privesc/FIM des 10 dernières min
 #                                               # (après test_nix01.sh --trigger)
 # Env: NIX01_IP (défaut 192.168.56.101), AGENT_NAME (défaut NIX01)
@@ -12,6 +13,8 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 CASES="$HERE/cases.tsv"
+HP_CASES="$HERE/hp_cases.tsv"
+ATTACK="$HERE/../tools/attack_demo.py"
 NIX01_IP="${NIX01_IP:-192.168.56.101}"
 AGENT_NAME="${AGENT_NAME:-NIX01}"
 OSSEC=/var/ossec
@@ -51,15 +54,16 @@ done
 sec "2. Fichiers + configuration"
 check "décodeur installé"   test -s "$OSSEC/etc/decoders/honeypot_decoders.xml"
 check "règles installées"   test -s "$OSSEC/etc/rules/honeypot_rules.xml"
+check "règles SSH/FTP/Redis installées" test -s "$OSSEC/etc/rules/honeypot_services_rules.xml"
 check "logall activé"       grep -q "<logall>yes</logall>" "$OSSEC/etc/ossec.conf"
 if out=$("$OSSEC/bin/wazuh-analysisd" -t 2>&1); then
   ok "wazuh-analysisd -t : config + règles valides"
 else
   fail "wazuh-analysisd -t : $(grep -iE 'error|critical' <<<"$out" | head -3)"
 fi
-if grep -iE "(error|warning).*(honeypot|1001[0-9]{2}|1002[0-9]{2}|100300)" "$OSSEC/logs/ossec.log" | tail -3 | grep -q .; then
+if grep -iE "(error|warning).*(honeypot|1001[0-9]{2}|1002[0-9]{2}|100300|1003[0-9]{2}|1004[0-9]{2})" "$OSSEC/logs/ossec.log" | tail -3 | grep -q .; then
   warn "messages liés aux règles honeypot dans ossec.log :"
-  grep -iE "(error|warning).*(honeypot|1001[0-9]{2}|1002[0-9]{2}|100300)" "$OSSEC/logs/ossec.log" | tail -3 | sed 's/^/         /'
+  grep -iE "(error|warning).*(honeypot|1001[0-9]{2}|1002[0-9]{2}|100300|1003[0-9]{2}|1004[0-9]{2})" "$OSSEC/logs/ossec.log" | tail -3 | sed 's/^/         /'
 else
   ok "aucune erreur liée aux règles honeypot dans ossec.log"
 fi
@@ -91,6 +95,34 @@ bf=$(for i in $(seq 1 10); do
      done | timeout 90 "$LOGTEST" 2>&1)
 grep -qE "id: '100191'" <<<"$bf" && ok "brute_force_404    -> 100191" \
   || fail "brute_force_404    -> 100191 jamais déclenchée (vérifier que le décodeur extrait bien 'srcip')"
+
+# -----------------------------------------------------------------------------
+sec "4b. Règles SSH/FTP/Redis (wazuh-logtest, événements JSON de tests/hp_cases.tsv)"
+while IFS=$'\t' read -r name exp json; do
+  [[ -z "$name" || "$name" == \#* ]] && continue
+  got=$(logtest_rule "$json")
+  [[ "$got" == "$exp" ]] && ok "$(printf '%-22s -> %s' "$name" "$got")" \
+                         || fail "$(printf '%-22s -> %s (attendu %s)' "$name" "${got:-aucune}" "$exp")"
+done < "$HP_CASES"
+
+# Corrélations : plusieurs événements dans la même session wazuh-logtest
+hp_json() { # $1=honeypot $2=event_type $3=session $4..=paires "clé":"valeur" JSON supplémentaires
+  local hp="$1" et="$2" sid="$3"; shift 3
+  local extra=""; [[ $# -gt 0 ]] && extra=",$(IFS=,; echo "$*")"
+  printf '{"timestamp":"2026-11-22T10:00:00.000000+00:00","honeypot":"%s","event_type":"%s","srcip":"203.0.113.88","src_port":40000,"session":"%s"%s}\n' \
+    "$hp" "$et" "$sid" "$extra"
+}
+for hp in ssh ftp redis; do
+  bf=$(for i in $(seq 1 8); do
+         hp_json "$hp" login_attempt "bf$hp$i" '"username":"root"' "\"password\":\"pw$i\"" '"success":false'
+       done | timeout 90 "$LOGTEST" 2>&1)
+  grep -qE "id: '100410'" <<<"$bf" && ok "brute force $hp (8 échecs) -> 100410" \
+    || fail "brute force $hp (8 échecs) -> 100410 jamais déclenchée"
+done
+corr=$( { hp_json redis command s1 '"command":"CONFIG SET dir /var/spool/cron/crontabs"' '"verb":"CONFIG"'
+          hp_json redis command s1 '"command":"SAVE"' '"verb":"SAVE"'; } | timeout 90 "$LOGTEST" 2>&1)
+grep -qE "id: '100446'" <<<"$corr" && ok "Redis CONFIG SET dir + SAVE (même session) -> 100446" \
+  || fail "Redis CONFIG SET dir + SAVE (même session) -> 100446 jamais déclenchée"
 
 # -----------------------------------------------------------------------------
 sec "5. Règles privesc (wazuh-logtest, événements auditd simulés)"
@@ -166,6 +198,64 @@ print(f"E2E {okn} OK {failn} FAIL")
 sys.exit(1 if failn else 0)
 PY
   if [[ $? -eq 0 ]]; then OKN=$((OKN+1)); else FAILN=$((FAILN+1)); fi
+
+  sec "6b. Bout en bout : attaques SSH/FTP/Redis (tools/attack_demo.py) -> alertes"
+  if ! python3 -c "import paramiko" 2>/dev/null && ! command -v sshpass >/dev/null; then
+    echo "  ... installation de sshpass (client SSH de l'attaque simulée)"
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sshpass >/dev/null 2>&1 || warn "sshpass non installable : partie SSH sautée"
+  fi
+  START=$(date -u +%s)
+  if python3 "$ATTACK" --target "$NIX01_IP" --only ssh,ftp,redis --quiet; then
+    ok "attaque simulée exécutée (ssh, ftp, redis)"
+  else
+    fail "attack_demo.py a rencontré des erreurs (voir ci-dessus)"
+  fi
+  echo "  ... attente des alertes (max 120 s)"
+  python3 - "$ALERTS" "$START" "$AGENT_NAME" <<'PY'
+import json, sys, time
+from datetime import datetime
+alerts, start, agent = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+want = {
+    "ssh": {"100401", "100402", "100410", "100404", "100423", "100421", "100422"},
+    "ftp": {"100401", "100402", "100410", "100404", "100432", "100431"},
+    "redis": {"100401", "100402", "100410", "100440", "100441", "100442", "100443", "100444",
+              "100445", "100446", "100447"},
+}
+
+
+def collect():
+    seen = {k: set() for k in want}
+    for ln in open(alerts, errors="replace"):
+        if '"honeypot"' not in ln:
+            continue
+        try:
+            a = json.loads(ln)
+            ts = datetime.strptime(a["timestamp"], "%Y-%m-%dT%H:%M:%S.%f%z").timestamp()
+        except (ValueError, KeyError):
+            continue
+        hp = a.get("data", {}).get("honeypot")
+        if ts >= start - 5 and hp in seen and a.get("agent", {}).get("name") == agent:
+            seen[hp].add(a["rule"]["id"])
+    return seen
+
+
+end = time.time() + 120
+while True:
+    seen = collect()
+    if all(want[k] <= seen[k] for k in want) or time.time() > end:
+        break
+    time.sleep(5)
+bad = 0
+for hp, rules in want.items():
+    for rid in sorted(rules):
+        if rid in seen[hp]:
+            print(f"  \033[32m[OK]\033[0m   {hp:<6} -> alerte {rid}")
+        else:
+            bad += 1
+            print(f"  \033[31m[FAIL]\033[0m {hp:<6} -> alerte {rid} absente (vues : {sorted(seen[hp]) or 'aucune'})")
+sys.exit(1 if bad else 0)
+PY
+  if [[ $? -eq 0 ]]; then OKN=$((OKN+1)); else FAILN=$((FAILN+1)); fi
 fi
 
 # -----------------------------------------------------------------------------
@@ -203,6 +293,25 @@ if others:
 sys.exit(1 if bad else 0)
 PY
   if [[ $? -eq 0 ]]; then OKN=$((OKN+1)); else FAILN=$((FAILN+1)); fi
+fi
+
+# -----------------------------------------------------------------------------
+sec "7. Dashboard Wazuh « Honeypot »"
+PW="${WAZUH_ADMIN_PASSWORD:-}"
+if [[ -z "$PW" && -f /root/wazuh-install-files.tar ]]; then
+  PW=$(tar -O -xf /root/wazuh-install-files.tar wazuh-install-files/wazuh-passwords.txt 2>/dev/null \
+       | grep -A1 "indexer_username: 'admin'" | grep -oP "indexer_password: '\K[^']+" || true)
+fi
+if [[ -z "$PW" ]]; then
+  warn "mot de passe admin introuvable : vérification du dashboard sautée"
+else
+  for obj in dashboard/hp-dashboard visualization/hp-vis-per-honeypot visualization/hp-vis-top-commands index-pattern/hp-wazuh-alerts; do
+    code=$(curl -sk -o /dev/null -w '%{http_code}' -u "admin:$PW" "https://localhost/api/saved_objects/$obj")
+    [[ "$code" == "200" ]] && ok "objet $obj présent" || fail "objet $obj absent (HTTP $code) -> sudo bash deploy/dashboard.sh"
+  done
+  n=$(curl -sk -u "admin:$PW" "https://localhost:9200/wazuh-alerts-*/_count?q=rule.groups:honeypot" | grep -oP '"count":\K[0-9]+' || echo 0)
+  [[ "${n:-0}" -gt 0 ]] && ok "$n alertes honeypot indexées (visibles dans le dashboard)" \
+    || warn "aucune alerte honeypot dans l'indexer (lancer --e2e ou tools/attack_demo.py)"
 fi
 
 echo -e "\n\e[1mRésultat:\e[0m \e[32m$OKN OK\e[0m, \e[33m$WARNN WARN\e[0m, \e[31m$FAILN FAIL\e[0m"
